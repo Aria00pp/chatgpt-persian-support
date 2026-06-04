@@ -1,0 +1,60 @@
+/* Keep RTL changes scoped to ChatGPT messages and the prompt composer. */
+.cgpt-rtl-composer {
+  direction: rtl !important;
+  text-align: right !important;
+  unicode-bidi: plaintext !important;
+}
+
+.cgpt-rtl-composer p,
+.cgpt-rtl-composer [data-placeholder] {
+  direction: rtl !important;
+  text-align: right !important;
+  unicode-bidi: plaintext !important;
+}
+
+.cgpt-rtl-message {
+  direction: rtl !important;
+  text-align: right !important;
+  unicode-bidi: plaintext;
+}
+
+.cgpt-rtl-message :is(p, h1, h2, h3, h4, h5, h6, blockquote, li, dd, dt) {
+  direction: rtl !important;
+  text-align: right !important;
+  unicode-bidi: plaintext;
+}
+
+.cgpt-rtl-message :is(ul, ol) {
+  direction: rtl !important;
+  text-align: right !important;
+  padding-right: 1.625rem;
+  padding-left: 0;
+}
+
+.cgpt-rtl-message blockquote {
+  border-right: 0.25rem solid currentColor;
+  border-left: 0 !important;
+  padding-right: 1rem;
+  padding-left: 0 !important;
+}
+
+/* Technical content remains readable and keeps its expected LTR layout. */
+.cgpt-rtl-message :is(pre, code, kbd, samp, textarea),
+.cgpt-rtl-message :is([class*="code"], [class*="Code"], [class*="syntax"], [class*="highlight"], [class*="editor"], [class*="Editor"]),
+.cgpt-rtl-message :is([role="grid"], [role="treegrid"]) {
+  direction: ltr !important;
+  text-align: left !important;
+  unicode-bidi: isolate !important;
+}
+
+.cgpt-rtl-message table {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: isolate;
+}
+
+.cgpt-rtl-message :is(math, .katex, .MathJax) {
+  direction: ltr !important;
+  text-align: left;
+  unicode-bidi: isolate !important;
+}
