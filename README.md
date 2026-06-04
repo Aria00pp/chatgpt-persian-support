@@ -8,7 +8,7 @@ The extension applies formatting to messages already on the page and uses a batc
 
 - Supports `https://chatgpt.com/*` and `https://chat.openai.com/*`.
 - Makes the ChatGPT composer RTL without replacing or cloning the input, so normal typing, selection, paste, keyboard shortcuts, voice input, uploads, and sending continue to use ChatGPT's own behavior.
-- Formats user and assistant messages, including existing and dynamically generated content.
+- Formats user and assistant message prose, including existing and dynamically generated content, without forcing action bars or surrounding controls into RTL.
 - Keeps code blocks, inline code, keyboard input, terminal-like output, tables, math, and common syntax-highlighted/editor elements LTR and left-aligned.
 - Keeps RTL styling scoped to the composer and messages instead of changing the entire page.
 - Uses no external dependencies, remote code, permissions, network requests, telemetry, or tracking.
@@ -33,17 +33,18 @@ After changing extension files locally, click the extension's **Reload** button 
 
 Load the unpacked extension, then verify the following on `https://chatgpt.com/`:
 
-- [ ] The composer is right-to-left and right-aligned before typing.
-- [ ] Persian text starts from the right while typing.
+- [ ] The composer is right-to-left and right-aligned before typing and while typing Persian.
 - [ ] Sending a Persian prompt works normally, including Enter and Shift+Enter behavior.
-- [ ] The sent user message appears RTL and right-aligned.
-- [ ] The assistant response appears RTL and right-aligned.
+- [ ] The sent user message prose appears RTL and right-aligned.
+- [ ] The assistant response prose appears RTL and right-aligned.
 - [ ] A newly streamed assistant response becomes RTL without a refresh.
 - [ ] Switching between chats continues to apply RTL formatting.
 - [ ] Code blocks, inline code, JSON, and terminal output remain LTR and left-aligned.
 - [ ] Lists render with right-side indentation.
 - [ ] English and mixed Persian-English text remain readable.
-- [ ] The sidebar, buttons, menus, model selector, voice input, file upload, toolbar, and send button are not visually broken.
+- [ ] Search boxes, dialogs, menus, settings panels, sidebars, and the model selector are not accidentally RTL-formatted.
+- [ ] Message action buttons such as copy, retry/regenerate, and feedback remain visually normal.
+- [ ] Voice input, file upload, toolbar controls, and the send button are not visually broken.
 - [ ] Repeat the relevant checks on `https://chat.openai.com/` if that host is available for the account.
 
 ## Privacy

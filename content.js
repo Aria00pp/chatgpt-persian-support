@@ -19,30 +19,152 @@
     "main article"
   ].join(",");
 
+  const EXCLUDED_UI_SELECTOR = [
+    "[role='dialog']",
+    "[aria-modal='true']",
+    "nav",
+    "aside",
+    "header",
+    "footer",
+    "[role='menu']",
+    "[role='listbox']",
+    "[role='search']",
+    "[data-testid*='modal' i]",
+    "[data-testid*='settings' i]",
+    "[data-testid*='search' i]",
+    "[data-testid*='filter' i]"
+  ].join(",");
+
+  const COMPOSER_CONTAINER_SELECTOR = [
+    "form",
+    "[data-testid*='composer' i]",
+    "[data-testid*='prompt' i]"
+  ].join(",");
+
+  const COMPOSER_CONTROL_SELECTOR = [
+    "button[type='submit']",
+    "button[data-testid*='send' i]",
+    "button[aria-label*='send' i]",
+    "button[data-testid*='voice' i]",
+    "button[aria-label*='voice' i]",
+    "button[data-testid*='upload' i]",
+    "button[aria-label*='upload' i]",
+    "input[type='file']"
+  ].join(",");
+
+  const MESSAGE_PROSE_SELECTOR = ".markdown, .prose";
+  const MESSAGE_TEXT_BLOCK_SELECTOR = [
+    "p",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "ul",
+    "ol",
+    "blockquote",
+    "dl"
+  ].join(",");
+
+  const CONTROL_AREA_SELECTOR = [
+    "button",
+    "[role='button']",
+    "[role='toolbar']",
+    "[role='menu']",
+    "[role='listbox']",
+    "[data-testid*='copy' i]",
+    "[data-testid*='feedback' i]"
+  ].join(",");
+
+  const pendingRoots = new Set();
+  let fullScanScheduled = false;
   let scheduled = false;
 
-  function elementsMatching(root, selector) {
-    const matches = [];
+  function elementsMatching(root, selector, includeClosest = false) {
+    const matches = new Set();
 
-    if (root instanceof Element && root.matches(selector)) {
-      matches.push(root);
+    if (root instanceof Element) {
+      if (root.matches(selector)) {
+        matches.add(root);
+      }
+
+      if (includeClosest) {
+        const closest = root.closest(selector);
+        if (closest) {
+          matches.add(closest);
+        }
+      }
     }
 
     if (root && typeof root.querySelectorAll === "function") {
-      matches.push(...root.querySelectorAll(selector));
+      for (const element of root.querySelectorAll(selector)) {
+        matches.add(element);
+      }
     }
 
     return matches;
   }
 
-  function isMessageElement(element) {
-    if (element.matches("[data-message-author-role='user'], [data-message-author-role='assistant']")) {
+  function normalizedInputHint(element) {
+    return [
+      element.getAttribute("aria-label"),
+      element.getAttribute("placeholder"),
+      element.getAttribute("data-placeholder"),
+      element.getAttribute("name")
+    ].filter(Boolean).join(" ").toLowerCase();
+  }
+
+  function isExcludedUiArea(element) {
+    if (element.closest(EXCLUDED_UI_SELECTOR)) {
       return true;
     }
 
-    // Articles are ChatGPT's semantic conversation-turn fallback when author-role
-    // data attributes are absent. Articles outside the primary content are ignored.
-    return element.matches("main article");
+    if (element.matches("input[type='search'], [role='searchbox'], [role='combobox']")) {
+      return true;
+    }
+
+    return /\b(search|settings?|filter|find)\b|جستجو|تنظیمات|بحث|إعدادات/.test(
+      normalizedInputHint(element)
+    );
+  }
+
+  function getComposerContainer(element) {
+    if (isExcludedUiArea(element)) {
+      return null;
+    }
+
+    const container = element.closest(COMPOSER_CONTAINER_SELECTOR);
+    if (!container || isExcludedUiArea(container) || !container.closest("main")) {
+      return null;
+    }
+
+    return container;
+  }
+
+  function isLikelyComposerContainer(element) {
+    if (element.id === "prompt-textarea" && !isExcludedUiArea(element)) {
+      return true;
+    }
+
+    const container = getComposerContainer(element);
+    if (!container) {
+      return false;
+    }
+
+    const hasComposerControl = Boolean(container.querySelector(COMPOSER_CONTROL_SELECTOR));
+    const hasMessageHint = /message|prompt|ask|chatgpt|پیام|پرسش|سؤال|سوال|بنویس|اكتب|رسالة/.test(
+      normalizedInputHint(element)
+    );
+    const hasSemanticContainer = container.matches(
+      "[data-testid*='composer' i], [data-testid*='prompt' i]"
+    );
+
+    return hasComposerControl || hasMessageHint || hasSemanticContainer;
+  }
+
+  function isMessageElement(element) {
+    return element.matches(MESSAGE_SELECTOR);
   }
 
   function isComposerElement(element) {
@@ -50,13 +172,47 @@
       return false;
     }
 
-    if (element.id === "prompt-textarea" || element.classList.contains("ProseMirror")) {
-      return true;
+    return isLikelyComposerContainer(element);
+  }
+
+  function topLevelTargets(elements) {
+    return elements.filter((element, index) => (
+      !elements.some((other, otherIndex) => otherIndex !== index && other.contains(element))
+    ));
+  }
+
+  function getMessageTextTargets(messageElement) {
+    const proseTargets = [...messageElement.querySelectorAll(MESSAGE_PROSE_SELECTOR)]
+      .filter((element) => !element.closest(CONTROL_AREA_SELECTOR));
+
+    if (proseTargets.length > 0) {
+      return topLevelTargets(proseTargets);
     }
 
-    // Generic textbox selectors are accepted only in ChatGPT's primary content/form area,
-    // which avoids changing search fields and textboxes in menus or dialogs.
-    return Boolean(element.closest("main, form"));
+    const messageIdTargets = [...messageElement.querySelectorAll("[data-message-id]")]
+      .filter((element) => (
+        element.querySelector(MESSAGE_TEXT_BLOCK_SELECTOR) &&
+        !element.querySelector(CONTROL_AREA_SELECTOR)
+      ));
+
+    if (messageIdTargets.length > 0) {
+      return topLevelTargets(messageIdTargets);
+    }
+
+    const textBlockTargets = [...messageElement.querySelectorAll(MESSAGE_TEXT_BLOCK_SELECTOR)]
+      .filter((element) => !element.closest("pre, code, table, [role='toolbar'], [role='menu']"));
+
+    if (textBlockTargets.length > 0) {
+      return topLevelTargets(textBlockTargets);
+    }
+
+    // Plain user messages may not contain semantic prose children. Author-role
+    // containers are safer fallbacks than whole article turns with action bars.
+    const authorRoleTarget = messageElement.matches("[data-message-author-role]")
+      ? messageElement
+      : messageElement.querySelector("[data-message-author-role='user'], [data-message-author-role='assistant']");
+
+    return [authorRoleTarget || messageElement];
   }
 
   function markRtl(element, className) {
@@ -70,7 +226,7 @@
   }
 
   function applyRtlToComposer(root = document) {
-    for (const element of elementsMatching(root, COMPOSER_SELECTOR)) {
+    for (const element of elementsMatching(root, COMPOSER_SELECTOR, true)) {
       if (isComposerElement(element)) {
         markRtl(element, COMPOSER_CLASS);
       }
@@ -78,9 +234,13 @@
   }
 
   function applyRtlToMessages(root = document) {
-    for (const element of elementsMatching(root, MESSAGE_SELECTOR)) {
-      if (isMessageElement(element)) {
-        markRtl(element, MESSAGE_CLASS);
+    for (const messageElement of elementsMatching(root, MESSAGE_SELECTOR, true)) {
+      if (!isMessageElement(messageElement)) {
+        continue;
+      }
+
+      for (const target of getMessageTextTargets(messageElement)) {
+        markRtl(target, MESSAGE_CLASS);
       }
     }
   }
@@ -96,6 +256,13 @@
   }
 
   function scheduleApply(root = document) {
+    if (root === document || root === document.documentElement) {
+      fullScanScheduled = true;
+      pendingRoots.clear();
+    } else if (!fullScanScheduled && root instanceof Element) {
+      pendingRoots.add(root);
+    }
+
     if (scheduled) {
       return;
     }
@@ -103,7 +270,19 @@
     scheduled = true;
     requestAnimationFrame(() => {
       scheduled = false;
-      applyRtl(root.isConnected === false ? document : root);
+
+      if (fullScanScheduled) {
+        fullScanScheduled = false;
+        pendingRoots.clear();
+        applyRtl(document);
+        return;
+      }
+
+      const roots = [...pendingRoots];
+      pendingRoots.clear();
+      for (const pendingRoot of roots) {
+        applyRtl(pendingRoot.isConnected ? pendingRoot : document);
+      }
     });
   }
 
@@ -114,10 +293,10 @@
     }
 
     const observer = new MutationObserver((mutations) => {
-      // Batch all mutations into one pass. Scanning the document is intentional:
-      // streamed content and SPA transitions often replace a node's ancestors.
-      if (mutations.some((mutation) => mutation.addedNodes.length > 0)) {
-        scheduleApply(document);
+      for (const mutation of mutations) {
+        if (mutation.addedNodes.length > 0) {
+          scheduleApply(mutation.target);
+        }
       }
     });
 

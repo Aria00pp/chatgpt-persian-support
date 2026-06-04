@@ -1,4 +1,4 @@
-/* Keep RTL changes scoped to ChatGPT messages and the prompt composer. */
+/* Keep RTL changes scoped to confirmed ChatGPT message text and the prompt composer. */
 .cgpt-rtl-composer {
   direction: rtl !important;
   text-align: right !important;
@@ -39,22 +39,21 @@
 }
 
 /* Technical content remains readable and keeps its expected LTR layout. */
-.cgpt-rtl-message :is(pre, code, kbd, samp, textarea),
+.cgpt-rtl-message:is(pre, code, kbd, samp, textarea, table, math, .katex, .MathJax),
+.cgpt-rtl-message :is(pre, code, kbd, samp, textarea, table, math, .katex, .MathJax),
+.cgpt-rtl-message:is([class*="code"], [class*="Code"], [class*="syntax"], [class*="highlight"], [class*="editor"], [class*="Editor"]),
 .cgpt-rtl-message :is([class*="code"], [class*="Code"], [class*="syntax"], [class*="highlight"], [class*="editor"], [class*="Editor"]),
+.cgpt-rtl-message:is([role="grid"], [role="treegrid"]),
 .cgpt-rtl-message :is([role="grid"], [role="treegrid"]) {
   direction: ltr !important;
   text-align: left !important;
   unicode-bidi: isolate !important;
 }
 
-.cgpt-rtl-message table {
-  direction: ltr;
-  text-align: left;
-  unicode-bidi: isolate;
-}
-
-.cgpt-rtl-message :is(math, .katex, .MathJax) {
-  direction: ltr !important;
-  text-align: left;
-  unicode-bidi: isolate !important;
+/* Message controls keep ChatGPT's native LTR/start-aligned presentation. */
+.cgpt-rtl-message:is(button, svg, [role="button"], [role="toolbar"], [data-testid*="copy" i], [data-testid*="feedback" i], [aria-label*="Copy" i], [aria-label*="Regenerate" i], [aria-label*="Retry" i]),
+.cgpt-rtl-message :is(button, svg, [role="button"], [role="toolbar"], [data-testid*="copy" i], [data-testid*="feedback" i], [aria-label*="Copy" i], [aria-label*="Regenerate" i], [aria-label*="Retry" i]) {
+  direction: initial !important;
+  text-align: initial !important;
+  unicode-bidi: normal !important;
 }
