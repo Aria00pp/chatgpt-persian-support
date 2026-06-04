@@ -1,59 +1,105 @@
-/* Keep RTL changes scoped to confirmed ChatGPT message text and the prompt composer. */
-.cgpt-rtl-composer {
+/* Keep direction changes scoped to confirmed ChatGPT message text and the prompt composer. */
+.cgpt-dir-composer.cgpt-dir-rtl,
+.cgpt-dir-composer.cgpt-dir-rtl p,
+.cgpt-dir-composer.cgpt-dir-rtl [data-placeholder],
+.cgpt-dir-message.cgpt-dir-rtl,
+.cgpt-dir-message.cgpt-dir-rtl :is(p, h1, h2, h3, h4, h5, h6, blockquote, li, dd, dt) {
   direction: rtl !important;
   text-align: right !important;
   unicode-bidi: plaintext !important;
 }
 
-.cgpt-rtl-composer p,
-.cgpt-rtl-composer [data-placeholder] {
-  direction: rtl !important;
-  text-align: right !important;
+.cgpt-dir-composer.cgpt-dir-ltr,
+.cgpt-dir-composer.cgpt-dir-ltr p,
+.cgpt-dir-composer.cgpt-dir-ltr [data-placeholder],
+.cgpt-dir-message.cgpt-dir-ltr,
+.cgpt-dir-message.cgpt-dir-ltr :is(p, h1, h2, h3, h4, h5, h6, blockquote, li, dd, dt) {
+  direction: ltr !important;
+  text-align: left !important;
   unicode-bidi: plaintext !important;
 }
 
-.cgpt-rtl-message {
-  direction: rtl !important;
-  text-align: right !important;
-  unicode-bidi: plaintext;
-}
-
-.cgpt-rtl-message :is(p, h1, h2, h3, h4, h5, h6, blockquote, li, dd, dt) {
-  direction: rtl !important;
-  text-align: right !important;
-  unicode-bidi: plaintext;
-}
-
-.cgpt-rtl-message :is(ul, ol) {
+.cgpt-dir-message.cgpt-dir-rtl :is(ul, ol) {
   direction: rtl !important;
   text-align: right !important;
   padding-right: 1.625rem;
   padding-left: 0;
 }
 
-.cgpt-rtl-message blockquote {
+.cgpt-dir-message.cgpt-dir-rtl blockquote {
   border-right: 0.25rem solid currentColor;
   border-left: 0 !important;
   padding-right: 1rem;
   padding-left: 0 !important;
 }
 
-/* Technical content remains readable and keeps its expected LTR layout. */
-.cgpt-rtl-message:is(pre, code, kbd, samp, textarea, table, math, .katex, .MathJax),
-.cgpt-rtl-message :is(pre, code, kbd, samp, textarea, table, math, .katex, .MathJax),
-.cgpt-rtl-message:is([class*="code"], [class*="Code"], [class*="syntax"], [class*="highlight"], [class*="editor"], [class*="Editor"]),
-.cgpt-rtl-message :is([class*="code"], [class*="Code"], [class*="syntax"], [class*="highlight"], [class*="editor"], [class*="Editor"]),
-.cgpt-rtl-message:is([role="grid"], [role="treegrid"]),
-.cgpt-rtl-message :is([role="grid"], [role="treegrid"]) {
+.cgpt-dir-message.cgpt-dir-ltr :is(ul, ol) {
+  direction: ltr !important;
+  text-align: left !important;
+}
+
+/* Technical content remains readable and keeps its expected LTR layout in every mode. */
+.cgpt-dir-message:is(pre, code, kbd, samp, textarea, table, math, .katex, .MathJax),
+.cgpt-dir-message :is(pre, code, kbd, samp, textarea, table, math, .katex, .MathJax),
+.cgpt-dir-message:is([class*="code"], [class*="Code"], [class*="syntax"], [class*="highlight"], [class*="editor"], [class*="Editor"], [class*="terminal" i]),
+.cgpt-dir-message :is([class*="code"], [class*="Code"], [class*="syntax"], [class*="highlight"], [class*="editor"], [class*="Editor"], [class*="terminal" i]),
+.cgpt-dir-message:is([role="grid"], [role="treegrid"]),
+.cgpt-dir-message :is([role="grid"], [role="treegrid"]) {
   direction: ltr !important;
   text-align: left !important;
   unicode-bidi: isolate !important;
 }
 
-/* Message controls keep ChatGPT's native LTR/start-aligned presentation. */
-.cgpt-rtl-message:is(button, svg, [role="button"], [role="toolbar"], [data-testid*="copy" i], [data-testid*="feedback" i], [aria-label*="Copy" i], [aria-label*="Regenerate" i], [aria-label*="Retry" i]),
-.cgpt-rtl-message :is(button, svg, [role="button"], [role="toolbar"], [data-testid*="copy" i], [data-testid*="feedback" i], [aria-label*="Copy" i], [aria-label*="Regenerate" i], [aria-label*="Retry" i]) {
+/* Message controls keep ChatGPT's native presentation. */
+.cgpt-dir-message:is(button, svg, [role="button"], [role="toolbar"], [role="menu"], [data-testid*="copy" i], [data-testid*="feedback" i], [aria-label*="Copy" i], [aria-label*="Regenerate" i], [aria-label*="Retry" i]),
+.cgpt-dir-message :is(button, svg, [role="button"], [role="toolbar"], [role="menu"], [data-testid*="copy" i], [data-testid*="feedback" i], [aria-label*="Copy" i], [aria-label*="Regenerate" i], [aria-label*="Retry" i]) {
   direction: initial !important;
   text-align: initial !important;
   unicode-bidi: normal !important;
+}
+
+/* Compact sibling control: it occupies its own row and never overlays the composer. */
+.cgpt-dir-control {
+  align-items: center;
+  align-self: flex-end;
+  background: rgba(127, 127, 127, 0.12);
+  border: 1px solid rgba(127, 127, 127, 0.25);
+  border-radius: 999px;
+  color: inherit;
+  direction: ltr;
+  display: flex;
+  font: 500 11px/1.2 system-ui, sans-serif;
+  gap: 2px;
+  margin: 0 0 4px auto;
+  padding: 2px;
+  position: relative;
+  width: fit-content;
+  z-index: 1;
+}
+
+.cgpt-dir-control button {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  min-height: 22px;
+  padding: 3px 7px;
+}
+
+.cgpt-dir-control button:hover,
+.cgpt-dir-control button:focus-visible {
+  background: rgba(127, 127, 127, 0.2);
+  outline: none;
+}
+
+.cgpt-dir-control button:focus-visible {
+  box-shadow: 0 0 0 2px currentColor;
+}
+
+.cgpt-dir-control button.cgpt-dir-control-active {
+  background: #10a37f;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  color: #ffffff;
 }
