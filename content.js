@@ -149,6 +149,7 @@
   ].join(",");
 
   const EDITABLE_DIRECTION_TARGET_SELECTOR = [
+    ".ProseMirror",
     ".ProseMirror[contenteditable='true']",
     "[contenteditable='true']",
     "[role='textbox']",
@@ -159,6 +160,7 @@
 
   const pendingRoots = new Set();
   const originalDirections = new WeakMap();
+  const originalInlineStyles = new WeakMap();
   let selectedMode = DEFAULT_MODE;
   let fullScanScheduled = false;
   let scheduled = false;
@@ -321,6 +323,51 @@
     return true;
   }
 
+  function hasActiveEditControls(element) {
+    const container = element.closest(EDIT_RETRY_CONTAINER_SELECTOR) || element.parentElement;
+    if (!container || isExcludedUiArea(container)) {
+      return false;
+    }
+
+    return Boolean(container.querySelector(COMPOSER_CONTROL_SELECTOR));
+  }
+
+  function isFocusedWithin(element) {
+    const active = document.activeElement;
+    return Boolean(active && (element === active || element.contains(active)));
+  }
+
+  function isLikelyChatEditable(element) {
+    if (!isPromptLikeEditable(element) || !isVisibleConnected(element) || isMainComposer(element)) {
+      return false;
+    }
+
+    if (!element.closest("main") || isExcludedUiArea(element)) {
+      return false;
+    }
+
+    if (element.closest(`${EXCLUDED_UI_SELECTOR}, ${CONTROL_AREA_SELECTOR}, .${CONTROL_CLASS}`)) {
+      return false;
+    }
+
+    if (element.closest(EDIT_COMPOSER_EXCLUDED_SELECTOR)) {
+      return false;
+    }
+
+    if (isFocusedWithin(element) || hasActiveEditControls(element)) {
+      return true;
+    }
+
+    return Boolean(
+      element.matches("textarea, [contenteditable='true'], [role='textbox']") &&
+      !element.closest("[data-message-author-role='assistant'] .markdown, [data-message-author-role='assistant'] .prose")
+    );
+  }
+
+  function isActiveEditableComposer(element) {
+    return isUserMessageEditComposer(element) || isLikelyChatEditable(element);
+  }
+
   function isInlineEditComposer(element) {
     if (isUserMessageEditComposer(element)) {
       return true;
@@ -373,7 +420,7 @@
   }
 
   function isComposerElement(element) {
-    return isMainComposer(element) || isInlineEditComposer(element) || isRetryComposer(element);
+    return isMainComposer(element) || isInlineEditComposer(element) || isRetryComposer(element) || isActiveEditableComposer(element);
   }
 
   function topLevelTargets(elements) {
@@ -461,6 +508,29 @@
     return direction;
   }
 
+  function applyInlineDirectionStyle(element, direction) {
+    if (!originalInlineStyles.has(element)) {
+      originalInlineStyles.set(element, {
+        direction: element.style.direction,
+        textAlign: element.style.textAlign
+      });
+    }
+
+    element.style.direction = direction;
+    element.style.textAlign = direction === "rtl" ? "right" : "left";
+  }
+
+  function restoreInlineDirectionStyle(element) {
+    if (!originalInlineStyles.has(element)) {
+      return;
+    }
+
+    const originalStyle = originalInlineStyles.get(element);
+    element.style.direction = originalStyle.direction;
+    element.style.textAlign = originalStyle.textAlign;
+    originalInlineStyles.delete(element);
+  }
+
   function getEditableDirectionTargets(element) {
     const targets = new Set();
     if (element.matches(EDITABLE_DIRECTION_TARGET_SELECTOR)) {
@@ -481,6 +551,16 @@
   function applyDirectionToEditableTree(element, direction) {
     for (const target of getEditableDirectionTargets(element)) {
       applyDirection(target, COMPOSER_CLASS, direction);
+      applyInlineDirectionStyle(target, direction);
+    }
+  }
+
+  function applyDirectionToActiveEditables(root = document) {
+    for (const element of elementsMatching(root, COMPOSER_SELECTOR, true)) {
+      if (isActiveEditableComposer(element)) {
+        const direction = applyDirection(element, COMPOSER_CLASS);
+        applyDirectionToEditableTree(element, direction);
+      }
     }
   }
 
@@ -488,6 +568,7 @@
     const hadDirectionClass = element.classList.contains(APPLIED_CLASS) ||
       LEGACY_CLASSES.some((className) => element.classList.contains(className));
 
+    restoreInlineDirectionStyle(element);
     element.classList.remove(APPLIED_CLASS, COMPOSER_CLASS, MESSAGE_CLASS, ...DIRECTION_CLASSES, ...LEGACY_CLASSES);
     if (hadDirectionClass && originalDirections.has(element)) {
       const originalDirection = originalDirections.get(element);
@@ -609,6 +690,7 @@
     try {
       reconcileAppliedElements();
       applyDirectionToComposer(root);
+      applyDirectionToActiveEditables(root);
       applyDirectionToMessages(root);
       ensureDirectionControl();
     } catch (_error) {

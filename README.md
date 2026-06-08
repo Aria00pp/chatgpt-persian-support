@@ -12,7 +12,7 @@ The extension applies the selected mode to messages already on the page and uses
 - **LTR** makes the composer and message prose left-to-right and left-aligned.
 - **Auto** detects the first strong Persian/Arabic/Hebrew or Latin character. Composer direction updates live, while each message independently receives its detected direction. Empty or ambiguous text defaults to RTL.
 - Formats user and assistant message prose, including existing and dynamically generated content, without forcing action bars or surrounding controls into a direction.
-- Applies the selected direction to the main composer plus prompt-like edit and retry/regenerate input areas when they expose safe message-editing context.
+- Applies the selected direction to the main composer plus prompt-like edit and retry/regenerate input areas, including a full-document active-edit scan for ChatGPT edit boxes that appear outside the normal composer structure.
 - Uses CSS inline isolation for bold, italic, quote, link, and span content so mixed Persian-English prose is easier to read without mutating rendered message text or composer text.
 - Keeps code blocks, inline code, keyboard input, terminal-like output, tables, math, and common syntax-highlighted/editor elements LTR and left-aligned.
 - Does not replace, clone, wrap, or modify the text in ChatGPT's native composer.
@@ -58,8 +58,10 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] Auto mode makes Persian-first composer text RTL.
 - [ ] Auto mode makes English-first composer text LTR.
 - [ ] Edit a previous user message in RTL mode; the edit box is RTL and right-aligned.
-- [ ] Type Persian in edit mode; text starts from the right.
-- [ ] Edit a previous user message in LTR mode; the edit box is LTR and left-aligned.
+- [ ] Click the edit pencil in RTL mode; the edit text starts from the right immediately.
+- [ ] Type Persian in edit mode; text extends naturally from right to left.
+- [ ] Move the caret to the beginning/end in RTL edit mode; caret behavior feels RTL.
+- [ ] Edit a previous user message in LTR mode; the edit box is LTR and left-aligned for English text.
 - [ ] Edit a previous user message in Auto mode; direction updates live inside the edit box based on the edited text.
 - [ ] Retry/regenerate input flow receives the selected direction behavior.
 - [ ] Ctrl + Right Shift switches to RTL inside the composer.

@@ -27,8 +27,12 @@ for (const helper of [
   "isInlineEditComposer",
   "isRetryComposer",
   "isUserMessageEditComposer",
+  "isActiveEditableComposer",
+  "isLikelyChatEditable",
+  "applyDirectionToActiveEditables",
   "getEditableDirectionTargets",
   "applyDirectionToEditableTree",
+  "applyInlineDirectionStyle",
   "handleComposerFocus"
 ]) {
   assert(contentJs.includes(`function ${helper}`), `helper missing: ${helper}`);
@@ -41,6 +45,8 @@ assert(!contentJs.includes("textNode.replaceWith"), "rendered message text nodes
 assert(!contentJs.includes("isolateInlineBidiRuns"), "JS inline bidi mutation pass must stay disabled");
 assert(contentJs.includes('document.addEventListener("focusin", handleComposerFocus, true)'), "focusin handler must apply edit composer direction immediately");
 assert(contentJs.includes("EDITABLE_DIRECTION_TARGET_SELECTOR"), "editable tree direction targets must be defined");
+assert(contentJs.includes("applyDirectionToActiveEditables(root)"), "full apply pass must scan active editables");
+assert(contentJs.includes("applyInlineDirectionStyle(target, direction)"), "inline style forcing must be scoped through editable tree targets");
 
 for (const selector of ["strong", "b", "em", "i", "span", "q", "a"]) {
   assert(contentCss.includes(selector), `inline formatting selector missing: ${selector}`);
