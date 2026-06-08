@@ -26,22 +26,21 @@ for (const helper of [
   "isMainComposer",
   "isInlineEditComposer",
   "isRetryComposer",
-  "shouldSkipInlineBidiContainer",
-  "isolateInlineBidiRuns",
-  "wrapLatinRunsInTextNode",
-  "wrapRtlRunsInTextNode"
+  "isUserMessageEditComposer",
+  "getEditableDirectionTargets",
+  "applyDirectionToEditableTree",
+  "handleComposerFocus"
 ]) {
   assert(contentJs.includes(`function ${helper}`), `helper missing: ${helper}`);
 }
 
 assert(contentJs.includes("chrome.storage.local"), "mode storage must continue using chrome.storage.local");
 assert(contentJs.includes("createDirectionControl"), "direction control must still exist");
-assert(contentJs.includes('document.createElement("bdi")'), "inline bidi wrapper must use bdi");
-assert(contentCss.includes("cgpt-dir-inline-ltr"), "cgpt-dir-inline-ltr CSS class must exist");
-assert(contentCss.includes("cgpt-dir-inline-rtl"), "cgpt-dir-inline-rtl CSS class must exist");
-assert(contentJs.includes("!root.classList.contains(MESSAGE_CLASS)"), "inline wrapper must only process message targets");
-assert(contentJs.includes("root.classList.contains(COMPOSER_CLASS)"), "inline wrapper must guard against composer text");
-assert(contentJs.includes("COMPOSER_SELECTOR"), "inline skip selectors must include composer selector");
+assert(!contentJs.includes('document.createElement("bdi")'), "rendered message text must not be wrapped in bdi");
+assert(!contentJs.includes("textNode.replaceWith"), "rendered message text nodes must not be replaced");
+assert(!contentJs.includes("isolateInlineBidiRuns"), "JS inline bidi mutation pass must stay disabled");
+assert(contentJs.includes('document.addEventListener("focusin", handleComposerFocus, true)'), "focusin handler must apply edit composer direction immediately");
+assert(contentJs.includes("EDITABLE_DIRECTION_TARGET_SELECTOR"), "editable tree direction targets must be defined");
 
 for (const selector of ["strong", "b", "em", "i", "span", "q", "a"]) {
   assert(contentCss.includes(selector), `inline formatting selector missing: ${selector}`);

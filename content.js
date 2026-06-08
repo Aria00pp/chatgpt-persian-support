@@ -9,8 +9,6 @@
   const MESSAGE_CLASS = "cgpt-dir-message";
   const CONTROL_CLASS = "cgpt-dir-control";
   const ACTIVE_CONTROL_CLASS = "cgpt-dir-control-active";
-  const INLINE_LTR_CLASS = "cgpt-dir-inline-ltr";
-  const INLINE_RTL_CLASS = "cgpt-dir-inline-rtl";
   const LEGACY_CLASSES = ["cgpt-rtl-applied", "cgpt-rtl-composer", "cgpt-rtl-message"];
   const DIRECTION_CLASSES = ["cgpt-dir-auto", "cgpt-dir-rtl", "cgpt-dir-ltr"];
 
@@ -132,22 +130,32 @@
     "[role='treegrid']"
   ].join(",");
 
-  const INLINE_BIDI_SKIP_SELECTOR = [
-    TECHNICAL_SELECTOR,
-    CONTROL_AREA_SELECTOR,
-    COMPOSER_SELECTOR,
-    `.${CONTROL_CLASS}`,
-    `.${INLINE_LTR_CLASS}`,
-    `.${INLINE_RTL_CLASS}`,
-    "a",
-    "input",
-    "select",
-    "[contenteditable='true']",
-    "[role='textbox']"
+  const EDIT_COMPOSER_EXCLUDED_SELECTOR = [
+    "pre",
+    "code",
+    "kbd",
+    "samp",
+    "table",
+    "math",
+    ".katex",
+    ".MathJax",
+    "[class*='code']",
+    "[class*='Code']",
+    "[class*='syntax']",
+    "[class*='highlight']",
+    "[class*='terminal' i]",
+    "[role='grid']",
+    "[role='treegrid']"
   ].join(",");
 
-  const LATIN_RUN_PATTERN = /[A-Za-z][A-Za-z0-9_#]*(?:[.+/-][A-Za-z0-9_#]+)*(?:(?:\s+|\s*[+&/]\s*)[A-Za-z][A-Za-z0-9_#]*(?:[.+/-][A-Za-z0-9_#]+)*)*/g;
-  const RTL_RUN_PATTERN = /[\u0590-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+(?:\s+[\u0590-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+)*/gu;
+  const EDITABLE_DIRECTION_TARGET_SELECTOR = [
+    ".ProseMirror[contenteditable='true']",
+    "[contenteditable='true']",
+    "[role='textbox']",
+    "textarea",
+    "p",
+    "[data-placeholder]"
+  ].join(",");
 
   const pendingRoots = new Set();
   const originalDirections = new WeakMap();
@@ -280,13 +288,50 @@
     return Boolean(container && hasPromptContext(element, container));
   }
 
+  function isVisibleConnected(element) {
+    return Boolean(element.isConnected && (element.getClientRects().length > 0 || element.offsetParent));
+  }
+
+  function isInUserMessageArea(element) {
+    if (element.closest("[data-message-author-role='user']")) {
+      return true;
+    }
+
+    const article = element.closest("main article");
+    return Boolean(
+      article &&
+      article.querySelector("[data-message-author-role='user']") &&
+      !article.querySelector("[data-message-author-role='assistant']")
+    );
+  }
+
+  function isUserMessageEditComposer(element) {
+    if (!isPromptLikeEditable(element) || !isVisibleConnected(element) || !isInUserMessageArea(element)) {
+      return false;
+    }
+
+    if (element.closest(`${EXCLUDED_UI_SELECTOR}, ${CONTROL_AREA_SELECTOR}, .${CONTROL_CLASS}`)) {
+      return false;
+    }
+
+    if (element.closest(EDIT_COMPOSER_EXCLUDED_SELECTOR)) {
+      return false;
+    }
+
+    return true;
+  }
+
   function isInlineEditComposer(element) {
+    if (isUserMessageEditComposer(element)) {
+      return true;
+    }
+
     if (!isPromptLikeEditable(element)) {
       return false;
     }
 
     const article = element.closest("main article, [data-message-author-role]");
-    if (!article || isExcludedUiArea(article)) {
+    if (!article || isExcludedUiArea(article) || !isInUserMessageArea(element)) {
       return false;
     }
 
@@ -339,7 +384,7 @@
 
   function getMessageTextTargets(messageElement) {
     const proseTargets = [...messageElement.querySelectorAll(MESSAGE_PROSE_SELECTOR)]
-      .filter((element) => !element.closest(CONTROL_AREA_SELECTOR));
+      .filter((element) => !element.closest(`${CONTROL_AREA_SELECTOR}, ${COMPOSER_SELECTOR}`));
 
     if (proseTargets.length > 0) {
       return topLevelTargets(proseTargets);
@@ -348,7 +393,8 @@
     const messageIdTargets = [...messageElement.querySelectorAll("[data-message-id]")]
       .filter((element) => (
         element.querySelector(MESSAGE_TEXT_BLOCK_SELECTOR) &&
-        !element.querySelector(CONTROL_AREA_SELECTOR)
+        !element.querySelector(CONTROL_AREA_SELECTOR) &&
+        !element.querySelector(COMPOSER_SELECTOR)
       ));
 
     if (messageIdTargets.length > 0) {
@@ -356,7 +402,7 @@
     }
 
     const textBlockTargets = [...messageElement.querySelectorAll(MESSAGE_TEXT_BLOCK_SELECTOR)]
-      .filter((element) => !element.closest(`${TECHNICAL_SELECTOR}, [role='toolbar'], [role='menu']`));
+      .filter((element) => !element.closest(`${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, [role='toolbar'], [role='menu']`));
 
     if (textBlockTargets.length > 0) {
       return topLevelTargets(textBlockTargets);
@@ -400,117 +446,12 @@
   }
 
 
-  function shouldSkipInlineBidiContainer(element) {
-    return Boolean(
-      !element ||
-      element.closest(INLINE_BIDI_SKIP_SELECTOR) ||
-      element.isContentEditable
-    );
-  }
-
-  function createInlineBidiElement(text, direction) {
-    const wrapper = document.createElement("bdi");
-    wrapper.dir = direction;
-    wrapper.className = direction === "ltr" ? INLINE_LTR_CLASS : INLINE_RTL_CLASS;
-    wrapper.textContent = text;
-    return wrapper;
-  }
-
-  function wrapRunsInTextNode(textNode, pattern, direction) {
-    const text = textNode.nodeValue || "";
-    pattern.lastIndex = 0;
-
-    if (!pattern.test(text)) {
-      return false;
-    }
-
-    pattern.lastIndex = 0;
-    const fragment = document.createDocumentFragment();
-    let lastIndex = 0;
-    let wrapped = false;
-
-    for (const match of text.matchAll(pattern)) {
-      const run = match[0];
-      const index = match.index || 0;
-
-      if (index > lastIndex) {
-        fragment.append(document.createTextNode(text.slice(lastIndex, index)));
-      }
-
-      fragment.append(createInlineBidiElement(run, direction));
-      wrapped = true;
-      lastIndex = index + run.length;
-    }
-
-    if (!wrapped) {
-      return false;
-    }
-
-    if (lastIndex < text.length) {
-      fragment.append(document.createTextNode(text.slice(lastIndex)));
-    }
-
-    textNode.replaceWith(fragment);
-    return true;
-  }
-
-  function wrapLatinRunsInTextNode(textNode) {
-    return wrapRunsInTextNode(textNode, LATIN_RUN_PATTERN, "ltr");
-  }
-
-  function wrapRtlRunsInTextNode(textNode) {
-    return wrapRunsInTextNode(textNode, RTL_RUN_PATTERN, "rtl");
-  }
-
-  function isolateInlineBidiRuns(root, blockDirection) {
-    if (
-      !(root instanceof Element) ||
-      !root.classList.contains(MESSAGE_CLASS) ||
-      root.classList.contains(COMPOSER_CLASS) ||
-      shouldSkipInlineBidiContainer(root)
-    ) {
-      return;
-    }
-
-    const textNodes = [];
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode(textNode) {
-        if (!textNode.nodeValue || !textNode.nodeValue.trim()) {
-          return NodeFilter.FILTER_REJECT;
-        }
-
-        const parent = textNode.parentElement;
-        if (shouldSkipInlineBidiContainer(parent)) {
-          return NodeFilter.FILTER_REJECT;
-        }
-
-        return NodeFilter.FILTER_ACCEPT;
-      }
-    });
-
-    while (walker.nextNode()) {
-      textNodes.push(walker.currentNode);
-    }
-
-    for (const textNode of textNodes) {
-      if (!textNode.parentNode) {
-        continue;
-      }
-
-      if (blockDirection === "rtl") {
-        wrapLatinRunsInTextNode(textNode);
-      } else if (blockDirection === "ltr") {
-        wrapRtlRunsInTextNode(textNode);
-      }
-    }
-  }
-
   function clearDirectionClasses(element) {
     element.classList.remove(...DIRECTION_CLASSES, ...LEGACY_CLASSES);
   }
 
-  function applyDirection(element, kind) {
-    const direction = directionFor(element, kind);
+  function applyDirection(element, kind, forcedDirection = null) {
+    const direction = forcedDirection || directionFor(element, kind);
     if (!originalDirections.has(element)) {
       originalDirections.set(element, element.getAttribute("dir"));
     }
@@ -518,6 +459,29 @@
     element.classList.add(APPLIED_CLASS, kind, `cgpt-dir-${selectedMode}`, `cgpt-dir-${direction}`);
     element.setAttribute("dir", direction);
     return direction;
+  }
+
+  function getEditableDirectionTargets(element) {
+    const targets = new Set();
+    if (element.matches(EDITABLE_DIRECTION_TARGET_SELECTOR)) {
+      targets.add(element);
+    }
+
+    if (typeof element.querySelectorAll === "function") {
+      for (const target of element.querySelectorAll(EDITABLE_DIRECTION_TARGET_SELECTOR)) {
+        if (!target.closest(`${CONTROL_AREA_SELECTOR}, ${EDIT_COMPOSER_EXCLUDED_SELECTOR}, .${CONTROL_CLASS}`)) {
+          targets.add(target);
+        }
+      }
+    }
+
+    return targets;
+  }
+
+  function applyDirectionToEditableTree(element, direction) {
+    for (const target of getEditableDirectionTargets(element)) {
+      applyDirection(target, COMPOSER_CLASS, direction);
+    }
   }
 
   function removeDirection(element) {
@@ -541,7 +505,8 @@
   function applyDirectionToComposer(root = document) {
     for (const element of elementsMatching(root, COMPOSER_SELECTOR, true)) {
       if (isComposerElement(element)) {
-        applyDirection(element, COMPOSER_CLASS);
+        const direction = applyDirection(element, COMPOSER_CLASS);
+        applyDirectionToEditableTree(element, direction);
       }
     }
   }
@@ -553,8 +518,7 @@
       }
 
       for (const target of getMessageTextTargets(messageElement)) {
-        const direction = applyDirection(target, MESSAGE_CLASS);
-        isolateInlineBidiRuns(target, direction);
+        applyDirection(target, MESSAGE_CLASS);
       }
     }
   }
@@ -619,6 +583,9 @@
     for (const composer of document.querySelectorAll(COMPOSER_SELECTOR)) {
       if (isComposerElement(composer)) {
         currentTargets.add(composer);
+        for (const target of getEditableDirectionTargets(composer)) {
+          currentTargets.add(target);
+        }
       }
     }
 
@@ -716,7 +683,16 @@
   function handleComposerInput(event) {
     const composer = event.target instanceof Element ? event.target.closest(COMPOSER_SELECTOR) : null;
     if (composer && isComposerElement(composer) && selectedMode === "auto") {
-      applyDirection(composer, COMPOSER_CLASS);
+      const direction = applyDirection(composer, COMPOSER_CLASS);
+      applyDirectionToEditableTree(composer, direction);
+    }
+  }
+
+  function handleComposerFocus(event) {
+    const composer = event.target instanceof Element ? event.target.closest(COMPOSER_SELECTOR) : null;
+    if (composer && isComposerElement(composer)) {
+      const direction = applyDirection(composer, COMPOSER_CLASS);
+      applyDirectionToEditableTree(composer, direction);
     }
   }
 
@@ -782,6 +758,7 @@
   applyDirections(document);
   loadMode();
   document.addEventListener("input", handleComposerInput, true);
+  document.addEventListener("focusin", handleComposerFocus, true);
   document.addEventListener("keydown", handleKeyboardShortcut, true);
   startObserver();
   watchRouteChanges();
