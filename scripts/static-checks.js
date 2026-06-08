@@ -28,6 +28,8 @@ for (const helper of [
   "isRetryComposer",
   "isResponseChangeComposer",
   "isAskToChangeResponseInput",
+  "hasResponseChangeMenuSignals",
+  "isFocusedResponseChangeInput",
   "hasResponseChangeContext",
   "isUserMessageEditComposer",
   "isActiveEditableComposer",
@@ -53,7 +55,11 @@ assert(contentJs.includes("EDITABLE_DIRECTION_TARGET_SELECTOR"), "editable tree 
 assert(contentJs.includes("applyDirectionToActiveEditables(root)"), "full apply pass must scan active editables");
 assert(contentJs.includes("applyInlineDirectionStyle(target, direction)"), "inline style forcing must be scoped through editable tree targets");
 assert(contentJs.includes("isResponseChangeComposer(element)"), "response-change composer must be part of narrow composer detection");
+assert(contentJs.includes("hasResponseChangeMenuSignals(container)"), "response-change detection must use retry/search-web menu state");
+assert(contentJs.includes("isFocusedResponseChangeInput(element)"), "focused response-change input must be detected after placeholder text disappears");
+assert(/return isAskToChangeResponseInput\(element\) \|\| isFocusedResponseChangeInput\(element\) \|\| hasResponseChangeContext\(element\)/.test(contentJs), "response-change detection must not rely only on Ask to change response placeholder text");
 assert(contentJs.includes('document.addEventListener("input", handleComposerInput, true)'), "input handler must keep Auto mode live for composers");
+assert(contentJs.includes('element.style.unicodeBidi = "plaintext"'), "confirmed editable targets should force plaintext bidi behavior inline");
 
 for (const selector of ["strong", "b", "em", "i", "span", "q", "a"]) {
   assert(contentCss.includes(selector), `inline formatting selector missing: ${selector}`);
