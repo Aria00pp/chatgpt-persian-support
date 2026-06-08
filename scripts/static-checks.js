@@ -12,6 +12,8 @@ assert.deepStrictEqual(
   "content script matches must stay limited to ChatGPT hosts"
 );
 assert.deepStrictEqual(manifest.permissions, ["storage"], "only the storage permission should be requested");
+assert(!manifest.host_permissions, "host permissions must not be added");
+assert(!manifest.background, "background scripts must not be added for this content-only feature");
 
 for (const api of ["fetch(", "XMLHttpRequest", "sendBeacon", "WebSocket"]) {
   assert(!contentJs.includes(api), `network API must not be used: ${api}`);
@@ -51,7 +53,12 @@ for (const helper of [
   "isEditableDirectionExcluded",
   "debugEditableContext",
   "installDebugInspector",
-  "handleComposerFocus"
+  "handleComposerFocus",
+  "isTableElement",
+  "getTableDirectionTargets",
+  "shouldDirectionManageTable",
+  "directionForTableCell",
+  "applyDirectionToTableCells"
 ]) {
   assert(contentJs.includes(`function ${helper}`), `helper missing: ${helper}`);
 }
@@ -96,6 +103,15 @@ assert(contentJs.includes("excludedMenuItemRows"), "diagnostics must report excl
 assert(contentJs.includes("applyDirectionToFocusedResponseChangeMenus(root)"), "apply pass must handle focused response-change menu pseudo-inputs");
 assert(contentJs.includes("console.info"), "diagnostics should log locally to the console only");
 assert(contentJs.includes("previewText(container && container.textContent, 500)"), "diagnostic container text must be limited");
+assert(contentJs.includes('for (const tableElement of getTableDirectionTargets(messageElement))'), "message apply pass must process tables separately from prose targets");
+assert(/function directionForTableCell\(cellElement\) \{[\s\S]*?detectDirectionFromText\(cellElement\.textContent/.test(contentJs), "table cell direction must use text detection per cell");
+assert(/function applyDirectionToTableCells\(tableElement\) \{[\s\S]*?querySelectorAll\("th, td"\)/.test(contentJs), "table direction must be applied independently to th and td cells");
+assert(contentJs.includes('tableElement.setAttribute("dir", "ltr")'), "table element must keep stable LTR column layout");
+assert(contentCss.includes(".cgpt-dir-table"), "scoped table direction class must be styled");
+assert(contentCss.includes(".cgpt-dir-table-cell.cgpt-dir-rtl"), "RTL table cell class must be styled");
+assert(contentCss.includes(".cgpt-dir-table-cell.cgpt-dir-ltr"), "LTR table cell class must be styled");
+assert(!/table\s*\{[^}]*direction\s*:\s*rtl/im.test(contentCss), "must not use broad table { direction: rtl }");
+assert(!/\.cgpt-dir-message\s+:is\([^)]*table[^)]*\)\s*\{[^}]*direction\s*:\s*rtl/im.test(contentCss), "message CSS must not force all tables RTL");
 
 for (const selector of ["strong", "b", "em", "i", "span", "q", "a"]) {
   assert(contentCss.includes(selector), `inline formatting selector missing: ${selector}`);
