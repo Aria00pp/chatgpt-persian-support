@@ -64,6 +64,13 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] Edit a previous user message in LTR mode; the edit box is LTR and left-aligned for English text.
 - [ ] Edit a previous user message in Auto mode; direction updates live inside the edit box based on the edited text.
 - [ ] Retry/regenerate input flow receives the selected direction behavior.
+- [ ] Open the retry/try-again menu.
+- [ ] Click "Ask to change response".
+- [ ] In RTL mode, Persian text starts from the right in the Ask to change response box.
+- [ ] In LTR mode, English text starts from the left in the Ask to change response box.
+- [ ] In Auto mode, direction updates live in the Ask to change response box.
+- [ ] Type this in the Ask to change response box: `این پاسخ را با Auto mode و shortcut و input handler بهتر توضیح بده`.
+- [ ] "Try again", "Search the web", buttons, and menu layout remain normal while only the response-change input changes direction.
 - [ ] Ctrl + Right Shift switches to RTL inside the composer.
 - [ ] Ctrl + Left Shift switches to LTR inside the composer.
 - [ ] Ctrl + Shift + A switches to Auto inside the composer.

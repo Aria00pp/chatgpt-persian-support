@@ -158,6 +158,23 @@
     "[data-placeholder]"
   ].join(",");
 
+  const RESPONSE_CHANGE_CONTEXT_SELECTOR = [
+    "form",
+    "[role='menu']",
+    "[role='dialog']",
+    "[role='alertdialog']",
+    "[popover]",
+    "[data-testid*='menu' i]",
+    "[data-testid*='popover' i]",
+    "[data-testid*='retry' i]",
+    "[data-testid*='regenerate' i]",
+    "[data-radix-menu-content]",
+    "[data-radix-popper-content-wrapper]"
+  ].join(",");
+
+  const ASK_TO_CHANGE_RESPONSE_RE = /ask\s+to\s+change\s+(?:the\s+)?response|change\s+(?:the\s+)?response|تغییر[^\n]{0,40}پاسخ|پاسخ[^\n]{0,40}(?:تغییر|اصلاح|ویرایش|عوض)|غيّر[^\n]{0,40}الرد|تغيير[^\n]{0,40}الرد|الرد[^\n]{0,40}(?:تغيير|تعديل)/i;
+  const RESPONSE_CHANGE_CONTEXT_RE = /try\s+again|search\s+(?:the\s+)?web|change\s+(?:the\s+)?response|تلاش[^\n]{0,20}دوباره|دوباره[^\n]{0,20}تلاش|جست(?:جو|وجو)[^\n]{0,20}وب|وب[^\n]{0,20}جست(?:جو|وجو)|تغییر[^\n]{0,40}پاسخ|پاسخ[^\n]{0,40}(?:تغییر|اصلاح|ویرایش|عوض)|حاول[^\n]{0,20}مرة|البحث[^\n]{0,20}الويب|الرد[^\n]{0,40}(?:تغيير|تعديل)/i;
+
   const pendingRoots = new Set();
   const originalDirections = new WeakMap();
   const originalInlineStyles = new WeakMap();
@@ -235,8 +252,8 @@
     );
   }
 
-  function isPromptLikeEditable(element) {
-    if (!element.matches(COMPOSER_SELECTOR) || isExcludedUiArea(element)) {
+  function isPromptLikeEditable(element, allowExcludedUiArea = false) {
+    if (!element.matches(COMPOSER_SELECTOR) || (!allowExcludedUiArea && isExcludedUiArea(element))) {
       return false;
     }
 
@@ -245,6 +262,70 @@
     }
 
     return element.isContentEditable || element.getAttribute("role") === "textbox";
+  }
+
+  function elementOwnText(element, includeTextContent = true) {
+    return [
+      element.getAttribute("aria-label"),
+      element.getAttribute("placeholder"),
+      element.getAttribute("data-placeholder"),
+      element.getAttribute("title"),
+      element.getAttribute("data-testid"),
+      includeTextContent ? element.textContent : ""
+    ].filter(Boolean).join(" ");
+  }
+
+  function responseChangeContainerFor(element) {
+    const semanticContainer = element.closest(RESPONSE_CHANGE_CONTEXT_SELECTOR);
+    if (semanticContainer) {
+      return semanticContainer;
+    }
+
+    let current = element.parentElement;
+    for (let depth = 0; current && depth < 4; depth += 1) {
+      if (current.querySelector(COMPOSER_CONTROL_SELECTOR)) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+
+    return element.parentElement;
+  }
+
+  function isAskToChangeResponseInput(element) {
+    return isPromptLikeEditable(element, true) &&
+      isVisibleConnected(element) &&
+      ASK_TO_CHANGE_RESPONSE_RE.test(elementOwnText(element, false));
+  }
+
+  function hasResponseChangeContext(element) {
+    if (!isPromptLikeEditable(element, true) || !isVisibleConnected(element)) {
+      return false;
+    }
+
+    const container = responseChangeContainerFor(element);
+    if (!container || container.closest("nav, aside, header, footer, [role='search'], [role='searchbox'], [role='combobox'], [role='listbox'], [data-testid*='settings' i], [data-testid*='search' i], [data-testid*='filter' i]")) {
+      return false;
+    }
+
+    const nearbyText = [elementOwnText(element), container.textContent || ""].join(" ").slice(0, 4000);
+    const hasContextSignal = RESPONSE_CHANGE_CONTEXT_RE.test(nearbyText);
+    const hasSendControl = Boolean(container.querySelector(COMPOSER_CONTROL_SELECTOR));
+
+    return hasContextSignal && (hasSendControl || ASK_TO_CHANGE_RESPONSE_RE.test(nearbyText));
+  }
+
+  function isResponseChangeComposer(element) {
+    if (!isPromptLikeEditable(element, true) || !isVisibleConnected(element)) {
+      return false;
+    }
+
+    if (element.matches("input[type='search'], [role='searchbox'], [role='combobox']") ||
+        element.closest("nav, aside, header, footer, [role='listbox'], [role='combobox'], [data-testid*='settings' i], [data-testid*='search' i], [data-testid*='filter' i]")) {
+      return false;
+    }
+
+    return isAskToChangeResponseInput(element) || hasResponseChangeContext(element);
   }
 
   function getComposerContainer(element) {
@@ -365,7 +446,7 @@
   }
 
   function isActiveEditableComposer(element) {
-    return isUserMessageEditComposer(element) || isLikelyChatEditable(element);
+    return isUserMessageEditComposer(element) || isLikelyChatEditable(element) || isResponseChangeComposer(element);
   }
 
   function isInlineEditComposer(element) {
@@ -412,7 +493,7 @@
   }
 
   function isLikelyComposerContainer(element) {
-    return isMainComposer(element) || isInlineEditComposer(element) || isRetryComposer(element);
+    return isMainComposer(element) || isInlineEditComposer(element) || isRetryComposer(element) || isResponseChangeComposer(element);
   }
 
   function isMessageElement(element) {
@@ -420,7 +501,7 @@
   }
 
   function isComposerElement(element) {
-    return isMainComposer(element) || isInlineEditComposer(element) || isRetryComposer(element) || isActiveEditableComposer(element);
+    return isMainComposer(element) || isInlineEditComposer(element) || isRetryComposer(element) || isResponseChangeComposer(element) || isActiveEditableComposer(element);
   }
 
   function topLevelTargets(elements) {

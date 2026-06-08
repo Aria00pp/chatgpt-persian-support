@@ -26,6 +26,9 @@ for (const helper of [
   "isMainComposer",
   "isInlineEditComposer",
   "isRetryComposer",
+  "isResponseChangeComposer",
+  "isAskToChangeResponseInput",
+  "hasResponseChangeContext",
   "isUserMessageEditComposer",
   "isActiveEditableComposer",
   "isLikelyChatEditable",
@@ -41,12 +44,16 @@ for (const helper of [
 assert(contentJs.includes("chrome.storage.local"), "mode storage must continue using chrome.storage.local");
 assert(contentJs.includes("createDirectionControl"), "direction control must still exist");
 assert(!contentJs.includes('document.createElement("bdi")'), "rendered message text must not be wrapped in bdi");
+assert(!contentJs.includes("document.createElement('bdi')"), "rendered message text must not be wrapped in bdi");
 assert(!contentJs.includes("textNode.replaceWith"), "rendered message text nodes must not be replaced");
+assert(!/\.replaceWith\s*\(/.test(contentJs), "text nodes or elements must not be replaced via replaceWith");
 assert(!contentJs.includes("isolateInlineBidiRuns"), "JS inline bidi mutation pass must stay disabled");
 assert(contentJs.includes('document.addEventListener("focusin", handleComposerFocus, true)'), "focusin handler must apply edit composer direction immediately");
 assert(contentJs.includes("EDITABLE_DIRECTION_TARGET_SELECTOR"), "editable tree direction targets must be defined");
 assert(contentJs.includes("applyDirectionToActiveEditables(root)"), "full apply pass must scan active editables");
 assert(contentJs.includes("applyInlineDirectionStyle(target, direction)"), "inline style forcing must be scoped through editable tree targets");
+assert(contentJs.includes("isResponseChangeComposer(element)"), "response-change composer must be part of narrow composer detection");
+assert(contentJs.includes('document.addEventListener("input", handleComposerInput, true)'), "input handler must keep Auto mode live for composers");
 
 for (const selector of ["strong", "b", "em", "i", "span", "q", "a"]) {
   assert(contentCss.includes(selector), `inline formatting selector missing: ${selector}`);
