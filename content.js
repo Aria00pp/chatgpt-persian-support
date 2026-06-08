@@ -154,14 +154,52 @@
     "[contenteditable='true']",
     "[role='textbox']",
     "textarea",
+    "input",
     "p",
     "[data-placeholder]"
+  ].join(",");
+
+  const EDITABLE_BLOCK_SELECTOR = [
+    "p",
+    "div",
+    "li",
+    "blockquote",
+    "[data-placeholder]"
+  ].join(",");
+
+  const RESPONSE_CHANGE_CONTEXT_SELECTOR = [
+    "form",
+    "[role='menu']",
+    "[role='dialog']",
+    "[role='alertdialog']",
+    "[popover]",
+    "[data-testid*='menu' i]",
+    "[data-testid*='popover' i]",
+    "[data-testid*='retry' i]",
+    "[data-testid*='regenerate' i]",
+    "[data-radix-menu-content]",
+    "[data-radix-popper-content-wrapper]"
+  ].join(",");
+
+  const ASK_TO_CHANGE_RESPONSE_RE = /ask\s+to\s+change\s+(?:the\s+)?response|change\s+(?:the\s+)?response|تغییر[^\n]{0,40}پاسخ|پاسخ[^\n]{0,40}(?:تغییر|اصلاح|ویرایش|عوض)|غيّر[^\n]{0,40}الرد|تغيير[^\n]{0,40}الرد|الرد[^\n]{0,40}(?:تغيير|تعديل)/i;
+  const RESPONSE_CHANGE_CONTEXT_RE = /try\s+again|search\s+(?:the\s+)?web|change\s+(?:the\s+)?response|تلاش[^\n]{0,20}دوباره|دوباره[^\n]{0,20}تلاش|جست(?:جو|وجو)[^\n]{0,20}وب|وب[^\n]{0,20}جست(?:جو|وجو)|تغییر[^\n]{0,40}پاسخ|پاسخ[^\n]{0,40}(?:تغییر|اصلاح|ویرایش|عوض)|حاول[^\n]{0,20}مرة|البحث[^\n]{0,20}الويب|الرد[^\n]{0,40}(?:تغيير|تعديل)/i;
+  const RESPONSE_CHANGE_MENU_ITEM_RE = /try\s+again|search\s+(?:the\s+)?web|تلاش[^\n]{0,20}دوباره|دوباره[^\n]{0,20}تلاش|جست(?:جو|وجو)[^\n]{0,20}وب|وب[^\n]{0,20}جست(?:جو|وجو)|حاول[^\n]{0,20}مرة|البحث[^\n]{0,20}الويب/i;
+  const RESPONSE_CHANGE_MENU_SELECTOR = [
+    "[role='menu']",
+    "[role='dialog']",
+    "[role='alertdialog']",
+    "[popover]",
+    "[data-testid*='menu' i]",
+    "[data-testid*='popover' i]",
+    "[data-radix-menu-content]",
+    "[data-radix-popper-content-wrapper]"
   ].join(",");
 
   const pendingRoots = new Set();
   const originalDirections = new WeakMap();
   const originalInlineStyles = new WeakMap();
   let selectedMode = DEFAULT_MODE;
+  let debugEnabled = false;
   let fullScanScheduled = false;
   let scheduled = false;
 
@@ -235,8 +273,8 @@
     );
   }
 
-  function isPromptLikeEditable(element) {
-    if (!element.matches(COMPOSER_SELECTOR) || isExcludedUiArea(element)) {
+  function isPromptLikeEditable(element, allowExcludedUiArea = false) {
+    if (!element.matches(COMPOSER_SELECTOR) || (!allowExcludedUiArea && isExcludedUiArea(element))) {
       return false;
     }
 
@@ -247,6 +285,506 @@
     return element.isContentEditable || element.getAttribute("role") === "textbox";
   }
 
+  function elementOwnText(element, includeTextContent = true) {
+    return [
+      element.getAttribute("aria-label"),
+      element.getAttribute("placeholder"),
+      element.getAttribute("data-placeholder"),
+      element.getAttribute("title"),
+      element.getAttribute("data-testid"),
+      includeTextContent ? element.textContent : ""
+    ].filter(Boolean).join(" ");
+  }
+
+  function responseChangeContainerFor(element) {
+    const candidates = [];
+    let current = element.parentElement;
+
+    for (let depth = 0; current && depth < 8; depth += 1) {
+      if (current.matches("nav, aside, header, footer, [role='search'], [role='searchbox'], [role='combobox'], [role='listbox'], [data-testid*='settings' i], [data-testid*='search' i], [data-testid*='filter' i]")) {
+        break;
+      }
+
+      candidates.push(current);
+      current = current.parentElement;
+    }
+
+    const menuSignaled = candidates.find(hasResponseChangeMenuSignals);
+    if (menuSignaled) {
+      return menuSignaled;
+    }
+
+    const semanticContainer = candidates.find((candidate) => candidate.matches(RESPONSE_CHANGE_CONTEXT_SELECTOR));
+    if (semanticContainer) {
+      return semanticContainer;
+    }
+
+    const controlContainer = candidates.find((candidate) => candidate.querySelector(COMPOSER_CONTROL_SELECTOR));
+    return controlContainer || candidates[0] || element.parentElement;
+  }
+
+  function hasResponseChangeMenuSignals(container) {
+    if (!container) {
+      return false;
+    }
+
+    const contextText = [elementOwnText(container), container.textContent || ""].join(" ").slice(0, 5000);
+    return RESPONSE_CHANGE_CONTEXT_RE.test(contextText);
+  }
+
+  function hasIconOnlySubmitButtonNearEditable(element, container) {
+    if (!container || !hasResponseChangeMenuSignals(container)) {
+      return false;
+    }
+
+    const editableBounds = element.getBoundingClientRect();
+    for (const button of container.querySelectorAll("button, [role='button']")) {
+      if (button.contains(element) || element.contains(button)) {
+        continue;
+      }
+
+      const label = elementOwnText(button).trim();
+      const looksIconOnly = label.length === 0 || label.length < 3;
+      const type = button.getAttribute("type");
+      const looksSubmitLike = type === "submit" || button.querySelector("svg") || /send|submit|arrow|ارسال|إرسال/.test(normalizedInputHint(button));
+      const buttonBounds = button.getBoundingClientRect();
+      const isNearby = !editableBounds.width || !buttonBounds.width || Math.abs(buttonBounds.top - editableBounds.top) < Math.max(buttonBounds.height, editableBounds.height, 48);
+
+      if (looksIconOnly && looksSubmitLike && isNearby) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function isFloatingResponseChangeContainer(container, element) {
+    return Boolean(
+      container && (
+        container.matches(RESPONSE_CHANGE_CONTEXT_SELECTOR) ||
+        element.closest(RESPONSE_CHANGE_CONTEXT_SELECTOR) ||
+        container.style.position === "fixed" ||
+        container.style.position === "absolute"
+      )
+    );
+  }
+
+  function isAskToChangeResponseInput(element) {
+    return isPromptLikeEditable(element, true) &&
+      isVisibleConnected(element) &&
+      ASK_TO_CHANGE_RESPONSE_RE.test(elementOwnText(element, false));
+  }
+
+  function isFocusedResponseChangeInput(element) {
+    if (!isPromptLikeEditable(element, true) || !isVisibleConnected(element) || !isFocusedWithin(element)) {
+      return false;
+    }
+
+    const container = responseChangeContainerFor(element);
+    return Boolean(container && hasResponseChangeMenuSignals(container));
+  }
+
+  function hasResponseChangeContext(element) {
+    if (!isPromptLikeEditable(element, true) || !isVisibleConnected(element)) {
+      return false;
+    }
+
+    const container = responseChangeContainerFor(element);
+    if (!container || container.closest("nav, aside, header, footer, [role='search'], [role='searchbox'], [role='combobox'], [role='listbox'], [data-testid*='settings' i], [data-testid*='search' i], [data-testid*='filter' i]")) {
+      return false;
+    }
+
+    const nearbyText = [elementOwnText(element), container.textContent || ""].join(" ").slice(0, 5000);
+    const hasAskSignal = ASK_TO_CHANGE_RESPONSE_RE.test(nearbyText);
+    const hasMenuSignal = hasResponseChangeMenuSignals(container);
+    const hasNearbyIconSubmit = hasIconOnlySubmitButtonNearEditable(element, container);
+
+    return hasAskSignal || (hasMenuSignal && (isFocusedWithin(element) || isFloatingResponseChangeContainer(container, element) || hasNearbyIconSubmit));
+  }
+
+  function isResponseChangeComposer(element) {
+    if (!isPromptLikeEditable(element, true) || !isVisibleConnected(element)) {
+      return false;
+    }
+
+    if (isMainComposer(element) || isUserMessageEditComposer(element)) {
+      return false;
+    }
+
+    if (element.matches("input[type='search'], [role='searchbox'], [role='combobox']") ||
+        element.closest("button, [role='button'], nav, aside, header, footer, [role='listbox'], [role='combobox'], [data-testid*='settings' i], [data-testid*='search' i], [data-testid*='filter' i], [data-testid*='model' i]")) {
+      return false;
+    }
+
+    return isAskToChangeResponseInput(element) || isFocusedResponseChangeInput(element) || hasResponseChangeContext(element);
+  }
+
+
+
+
+  function responseChangeMenuContainerFor(element) {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    if (element.matches(RESPONSE_CHANGE_MENU_SELECTOR)) {
+      return element;
+    }
+
+    return element.closest(RESPONSE_CHANGE_MENU_SELECTOR);
+  }
+
+  function isExcludedResponseChangeMenuArea(element) {
+    return Boolean(
+      element.closest("nav, aside, header, footer, [role='search'], [role='searchbox'], [role='combobox'], [role='listbox'], [data-testid*='settings' i], [data-testid*='search' i], [data-testid*='filter' i], [data-testid*='model' i]")
+    );
+  }
+
+  function isFocusedResponseChangeMenu(element) {
+    if (!(element instanceof Element) || !isVisibleConnected(element) || isExcludedResponseChangeMenuArea(element)) {
+      return false;
+    }
+
+    const container = responseChangeMenuContainerFor(element);
+    if (!container || !isVisibleConnected(container) || isExcludedResponseChangeMenuArea(container)) {
+      return false;
+    }
+
+    const active = document.activeElement;
+    const focusedInMenu = Boolean(active && (active === container || container.contains(active) || element === active));
+    return focusedInMenu && hasResponseChangeMenuSignals(container);
+  }
+
+  function isResponseChangeMenuItem(element) {
+    if (!(element instanceof Element)) {
+      return false;
+    }
+
+    const role = element.getAttribute("role") || "";
+    const text = previewText(element.textContent, 240);
+    return role === "menuitem" || role === "option" || RESPONSE_CHANGE_MENU_ITEM_RE.test(text);
+  }
+
+  function responseChangeMenuItemRows(menuElement) {
+    if (!(menuElement instanceof Element)) {
+      return [];
+    }
+
+    const rows = [...menuElement.querySelectorAll("[role='menuitem'], [role='option'], button, [role='button']")]
+      .filter((element) => RESPONSE_CHANGE_MENU_ITEM_RE.test(previewText(element.textContent, 240)));
+
+    for (const element of menuElement.querySelectorAll("div, li, span")) {
+      if (RESPONSE_CHANGE_MENU_ITEM_RE.test(previewText(element.textContent, 240))) {
+        const row = element.closest("[role='menuitem'], [role='option'], button, [role='button']") || element;
+        if (!rows.includes(row)) {
+          rows.push(row);
+        }
+      }
+    }
+
+    return topLevelTargets(rows.filter((row) => menuElement.contains(row)));
+  }
+
+  function responseChangeMenuNativeTargets(menuElement) {
+    if (!(menuElement instanceof Element)) {
+      return [];
+    }
+
+    return topLevelTargets([
+      ...responseChangeMenuItemRows(menuElement),
+      ...menuElement.querySelectorAll("button, [role='button']")
+    ].filter((target, index, targets) => target instanceof Element && targets.indexOf(target) === index));
+  }
+
+  function isIconOnlyControl(element) {
+    if (!(element instanceof Element) || !element.matches("button, [role='button']")) {
+      return false;
+    }
+
+    const label = elementOwnText(element).trim();
+    return label.length === 0 || (label.length < 3 && Boolean(element.querySelector("svg")));
+  }
+
+  function isPseudoInputCandidate(element, menuElement, firstMenuItemTop) {
+    if (!(element instanceof Element) || element === menuElement || !isVisibleConnected(element)) {
+      return false;
+    }
+
+    if (element.matches("button, [role='button'], [role='menuitem'], [role='option'], svg") || isResponseChangeMenuItem(element)) {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return false;
+    }
+
+    const text = previewText(element.textContent, 240);
+    const aboveMenuItems = Number.isFinite(firstMenuItemTop) && rect.top < firstMenuItemTop - 1;
+    const hasNonMenuText = text.length > 0 && !RESPONSE_CHANGE_MENU_ITEM_RE.test(text);
+    const nearIconButton = [...menuElement.querySelectorAll("button, [role='button']")]
+      .some((button) => isIconOnlyControl(button) && Math.abs(button.getBoundingClientRect().top - rect.top) < Math.max(rect.height, 48));
+
+    return aboveMenuItems && (hasNonMenuText || nearIconButton || element.children.length > 0);
+  }
+
+  function getResponseChangePseudoInputTargets(menuElement) {
+    if (!(menuElement instanceof Element)) {
+      return [];
+    }
+
+    const menuRows = responseChangeMenuItemRows(menuElement);
+    const firstMenuItemTop = menuRows.reduce((top, row) => Math.min(top, row.getBoundingClientRect().top), Infinity);
+    const candidates = [];
+    const directChildren = [...menuElement.children].slice(0, 6);
+
+    for (const child of directChildren) {
+      if (isPseudoInputCandidate(child, menuElement, firstMenuItemTop)) {
+        candidates.push(child);
+      }
+
+      for (const descendant of [...child.querySelectorAll("div, span, p, [data-placeholder]")].slice(0, 12)) {
+        if (isPseudoInputCandidate(descendant, menuElement, firstMenuItemTop)) {
+          candidates.push(descendant);
+        }
+      }
+    }
+
+    return topLevelTargets(candidates);
+  }
+
+  function responseChangePseudoInputText(menuElement) {
+    return getResponseChangePseudoInputTargets(menuElement)
+      .map((element) => element.textContent || element.getAttribute("data-placeholder") || "")
+      .join(" ");
+  }
+
+  function directionForResponseChangeMenu(menuElement) {
+    if (selectedMode !== "auto") {
+      return selectedMode;
+    }
+
+    return detectDirectionFromText(responseChangePseudoInputText(menuElement));
+  }
+
+  function applyResponseChangeMenuTargetDirection(element, direction) {
+    applyDirection(element, COMPOSER_CLASS, direction);
+    applyInlineDirectionStyle(element, direction);
+  }
+
+  function applyNativeMenuItemDirection(element) {
+    applyDirection(element, COMPOSER_CLASS, "ltr");
+    applyInlineDirectionStyle(element, "ltr");
+    element.style.unicodeBidi = "normal";
+  }
+
+  function applyDirectionToResponseChangeMenu(menuElement, forcedDirection = null) {
+    const menu = responseChangeMenuContainerFor(menuElement) || menuElement;
+    if (!isFocusedResponseChangeMenu(menu)) {
+      return null;
+    }
+
+    const direction = forcedDirection || directionForResponseChangeMenu(menu);
+    const pseudoInputTargets = getResponseChangePseudoInputTargets(menu);
+    const menuItemRows = responseChangeMenuNativeTargets(menu);
+    const directionTargets = [menu, ...pseudoInputTargets];
+
+    for (const target of directionTargets) {
+      applyResponseChangeMenuTargetDirection(target, direction);
+    }
+
+    for (const row of menuItemRows) {
+      applyNativeMenuItemDirection(row);
+    }
+
+    debugResponseChangeMenuApplied(menu, direction, directionTargets, menuItemRows);
+    return { direction, directionTargets, menuItemRows };
+  }
+  function previewText(text, limit) {
+    return String(text || "").replace(/\s+/g, " ").trim().slice(0, limit);
+  }
+
+  function classNameForDebug(element) {
+    return typeof element.className === "string" ? element.className : String(element.getAttribute("class") || "");
+  }
+
+  function elementDirectionSummary(element) {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    return {
+      dir: element.getAttribute("dir") || "",
+      styleDirection: element.style.direction || "",
+      styleTextAlign: element.style.textAlign || "",
+      styleUnicodeBidi: element.style.unicodeBidi || ""
+    };
+  }
+
+  function elementSummary(element, includeText = true) {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    return {
+      tagName: element.tagName,
+      id: element.id || "",
+      className: classNameForDebug(element),
+      role: element.getAttribute("role") || "",
+      dataTestid: element.getAttribute("data-testid") || "",
+      ariaLabel: element.getAttribute("aria-label") || "",
+      placeholder: element.getAttribute("placeholder") || "",
+      dir: element.getAttribute("dir") || "",
+      styleDirection: element.style.direction || "",
+      styleTextAlign: element.style.textAlign || "",
+      styleUnicodeBidi: element.style.unicodeBidi || "",
+      isContentEditable: element.isContentEditable,
+      textContentPreview: includeText ? previewText(element.textContent, 120) : ""
+    };
+  }
+
+  function closestElementSummary(element, selector) {
+    return element instanceof Element ? elementSummary(element.closest(selector)) : null;
+  }
+
+  function isDebugEnabled() {
+    return Boolean(
+      debugEnabled ||
+      (document.documentElement && document.documentElement.dataset.cgptRtlDebug === "1")
+    );
+  }
+
+  function isFloatingDebugContext(element) {
+    if (!isPromptLikeEditable(element, true) && !isFocusedResponseChangeMenu(element)) {
+      return false;
+    }
+
+    const popupContainer = element.closest(RESPONSE_CHANGE_CONTEXT_SELECTOR);
+    if (popupContainer) {
+      return true;
+    }
+
+    const container = responseChangeContainerFor(element);
+    if (!container) {
+      return false;
+    }
+
+    const style = window.getComputedStyle ? window.getComputedStyle(container) : null;
+    return hasResponseChangeMenuSignals(container) || Boolean(style && ["fixed", "absolute", "sticky"].includes(style.position));
+  }
+
+  function parentChainForDebug(element) {
+    const parentChain = [];
+    let current = element;
+    for (let depth = 0; current && depth < 8; depth += 1) {
+      parentChain.push(elementSummary(current));
+      current = current.parentElement;
+    }
+    return parentChain;
+  }
+
+  function debugEditableContext(element, reason, force = false) {
+    if (!(element instanceof Element) || (!force && (!isDebugEnabled() || !isFloatingDebugContext(element)))) {
+      return;
+    }
+
+    const focusedMenu = isFocusedResponseChangeMenu(element);
+    const container = focusedMenu ? responseChangeMenuContainerFor(element) : responseChangeContainerFor(element);
+    const active = document.activeElement instanceof Element ? document.activeElement : null;
+    const editingHost = getEditingHost(element);
+    const activeBlock = getActiveEditableBlock(element);
+    const pseudoInputTargets = focusedMenu ? getResponseChangePseudoInputTargets(container) : [];
+    const excludedMenuItemRows = focusedMenu ? responseChangeMenuNativeTargets(container) : [];
+    const wouldApplyKeyboardDirection = Boolean((isComposerElement(element) && editingHost) || focusedMenu);
+    const diagnostic = {
+      reason,
+      selectedMode,
+      activeElement: elementSummary(active, false),
+      inspectedElement: elementSummary(element),
+      isPromptLikeEditableAllowExcluded: isPromptLikeEditable(element, true),
+      isFocusedResponseChangeMenu: focusedMenu,
+      isResponseChangeComposer: isResponseChangeComposer(element),
+      isAskToChangeResponseInput: isAskToChangeResponseInput(element),
+      isFocusedResponseChangeInput: isFocusedResponseChangeInput(element),
+      hasResponseChangeContext: hasResponseChangeContext(element),
+      isActiveEditableComposer: isActiveEditableComposer(element),
+      isComposerElement: isComposerElement(element),
+      responseChangeContainer: elementSummary(container),
+      hasResponseChangeMenuSignals: hasResponseChangeMenuSignals(container),
+      hasIconOnlySubmitButtonNearEditable: hasIconOnlySubmitButtonNearEditable(element, container),
+      editingHost: elementSummary(editingHost),
+      activeEditableBlock: elementSummary(activeBlock),
+      pseudoInputTargets: pseudoInputTargets.map((target) => elementSummary(target)),
+      excludedMenuItemRows: excludedMenuItemRows.map((row) => elementSummary(row)),
+      wouldApplyDirectionLikeKeyboardShortcut: wouldApplyKeyboardDirection,
+      directionState: {
+        element: elementDirectionSummary(element),
+        editingHost: elementDirectionSummary(editingHost),
+        activeBlock: elementDirectionSummary(activeBlock)
+      },
+      closestForm: closestElementSummary(element, "form"),
+      closestRoleMenuDialogPopover: closestElementSummary(element, "[role='menu'], [role='dialog'], [role='alertdialog'], [popover]"),
+      closestRadixMenuPopupWrapper: closestElementSummary(element, "[data-radix-menu-content], [data-radix-popper-content-wrapper], [data-testid*='menu' i], [data-testid*='popover' i]"),
+      parentChain: parentChainForDebug(element),
+      containerTextPreview: previewText(container && container.textContent, 500)
+    };
+
+    console.info("[ChatGPT Persian Direction] editable debug", diagnostic);
+  }
+
+  function debugDirectionApplied(element, direction, targets) {
+    if (!isDebugEnabled() || !(element instanceof Element) || !isResponseChangeComposer(element)) {
+      return;
+    }
+
+    console.info("[ChatGPT Persian Direction] response-change direction applied", {
+      selectedMode,
+      direction,
+      element: elementSummary(element),
+      targets: targets.map((target) => elementSummary(target, false))
+    });
+  }
+
+  function debugResponseChangeMenuApplied(menuElement, direction, targets, excludedRows) {
+    if (!isDebugEnabled()) {
+      return;
+    }
+
+    console.info("[ChatGPT Persian Direction] response-change menu direction applied", {
+      selectedMode,
+      direction,
+      element: elementSummary(menuElement),
+      pseudoInputTargets: targets.map((target) => elementSummary(target, false)),
+      excludedMenuItemRows: excludedRows.map((row) => elementSummary(row, false))
+    });
+  }
+
+  function inspectActiveEditableContext() {
+    const active = document.activeElement instanceof Element ? document.activeElement : null;
+    const editable = active ? active.closest(COMPOSER_SELECTOR) || responseChangeMenuContainerFor(active) || active : null;
+    debugEditableContext(editable, "manual", true);
+  }
+
+  function handleDebugEvent(event) {
+    if (event.type === "cgpt-rtl-debug-enable") {
+      debugEnabled = true;
+      console.info("[ChatGPT Persian Direction] debug enabled");
+    } else if (event.type === "cgpt-rtl-debug-disable") {
+      debugEnabled = false;
+      if (document.documentElement) {
+        delete document.documentElement.dataset.cgptRtlDebug;
+      }
+      console.info("[ChatGPT Persian Direction] debug disabled");
+    } else if (event.type === "cgpt-rtl-inspect-active") {
+      inspectActiveEditableContext();
+    }
+  }
+
+  function installDebugInspector() {
+    document.addEventListener("cgpt-rtl-debug-enable", handleDebugEvent);
+    document.addEventListener("cgpt-rtl-debug-disable", handleDebugEvent);
+    document.addEventListener("cgpt-rtl-inspect-active", handleDebugEvent);
+  }
   function getComposerContainer(element) {
     if (isExcludedUiArea(element)) {
       return null;
@@ -365,7 +903,7 @@
   }
 
   function isActiveEditableComposer(element) {
-    return isUserMessageEditComposer(element) || isLikelyChatEditable(element);
+    return isUserMessageEditComposer(element) || isLikelyChatEditable(element) || isResponseChangeComposer(element);
   }
 
   function isInlineEditComposer(element) {
@@ -412,7 +950,7 @@
   }
 
   function isLikelyComposerContainer(element) {
-    return isMainComposer(element) || isInlineEditComposer(element) || isRetryComposer(element);
+    return isMainComposer(element) || isInlineEditComposer(element) || isRetryComposer(element) || isResponseChangeComposer(element);
   }
 
   function isMessageElement(element) {
@@ -420,7 +958,7 @@
   }
 
   function isComposerElement(element) {
-    return isMainComposer(element) || isInlineEditComposer(element) || isRetryComposer(element) || isActiveEditableComposer(element);
+    return isMainComposer(element) || isInlineEditComposer(element) || isRetryComposer(element) || isResponseChangeComposer(element) || isActiveEditableComposer(element);
   }
 
   function topLevelTargets(elements) {
@@ -512,12 +1050,14 @@
     if (!originalInlineStyles.has(element)) {
       originalInlineStyles.set(element, {
         direction: element.style.direction,
-        textAlign: element.style.textAlign
+        textAlign: element.style.textAlign,
+        unicodeBidi: element.style.unicodeBidi
       });
     }
 
     element.style.direction = direction;
     element.style.textAlign = direction === "rtl" ? "right" : "left";
+    element.style.unicodeBidi = "plaintext";
   }
 
   function restoreInlineDirectionStyle(element) {
@@ -528,7 +1068,112 @@
     const originalStyle = originalInlineStyles.get(element);
     element.style.direction = originalStyle.direction;
     element.style.textAlign = originalStyle.textAlign;
+    element.style.unicodeBidi = originalStyle.unicodeBidi;
     originalInlineStyles.delete(element);
+  }
+
+
+  function isEditableDirectionExcluded(element, allowMenuAncestor = false) {
+    const excludedSelector = allowMenuAncestor
+      ? [
+          "button",
+          "[role='button']",
+          "[role='toolbar']",
+          "[role='listbox']",
+          "[data-testid*='copy' i]",
+          "[data-testid*='feedback' i]",
+          EDIT_COMPOSER_EXCLUDED_SELECTOR,
+          `.${CONTROL_CLASS}`
+        ].join(",")
+      : `${CONTROL_AREA_SELECTOR}, ${EDIT_COMPOSER_EXCLUDED_SELECTOR}, .${CONTROL_CLASS}`;
+
+    return Boolean(element.closest(excludedSelector));
+  }
+  function getEditingHost(element) {
+    if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+      return element;
+    }
+
+    if (element.matches(".ProseMirror, [contenteditable='true'], [role='textbox']")) {
+      return element;
+    }
+
+    return element.closest(".ProseMirror, [contenteditable='true'], [role='textbox']");
+  }
+
+  function getActiveEditableBlock(element) {
+    const host = getEditingHost(element);
+    if (!host || host instanceof HTMLTextAreaElement || host instanceof HTMLInputElement) {
+      return host;
+    }
+
+    const selection = window.getSelection ? window.getSelection() : null;
+    const anchorNode = selection && selection.rangeCount > 0 ? selection.anchorNode : null;
+    const anchorElement = anchorNode instanceof Element ? anchorNode : anchorNode && anchorNode.parentElement;
+    const selectionBlock = anchorElement && host.contains(anchorElement)
+      ? anchorElement.closest(EDITABLE_BLOCK_SELECTOR)
+      : null;
+
+    if (selectionBlock && host.contains(selectionBlock)) {
+      return selectionBlock;
+    }
+
+    const focused = document.activeElement instanceof Element && host.contains(document.activeElement)
+      ? document.activeElement.closest(EDITABLE_BLOCK_SELECTOR)
+      : null;
+
+    if (focused && host.contains(focused)) {
+      return focused;
+    }
+
+    return host.querySelector(EDITABLE_BLOCK_SELECTOR) || host;
+  }
+
+  function applyParagraphDirection(element, direction) {
+    if (!element) {
+      return;
+    }
+
+    const host = getEditingHost(element) || element;
+    if (isEditableDirectionExcluded(element, isResponseChangeComposer(host))) {
+      return;
+    }
+
+    applyDirection(element, COMPOSER_CLASS, direction);
+    applyInlineDirectionStyle(element, direction);
+  }
+
+  function getKeyboardShortcutDirectionTargets(element) {
+    const targets = new Set();
+    const host = getEditingHost(element) || element;
+
+    if (host instanceof HTMLTextAreaElement || host instanceof HTMLInputElement) {
+      targets.add(host);
+      return targets;
+    }
+
+    targets.add(host);
+
+    const activeBlock = getActiveEditableBlock(host);
+    if (activeBlock) {
+      targets.add(activeBlock);
+    }
+
+    if (typeof host.querySelectorAll === "function") {
+      for (const block of host.querySelectorAll(EDITABLE_BLOCK_SELECTOR)) {
+        if (!isEditableDirectionExcluded(block, isResponseChangeComposer(host))) {
+          targets.add(block);
+        }
+      }
+    }
+
+    return targets;
+  }
+
+  function applyDirectionLikeKeyboardShortcut(element, direction) {
+    for (const target of getKeyboardShortcutDirectionTargets(element)) {
+      applyParagraphDirection(target, direction);
+    }
   }
 
   function getEditableDirectionTargets(element) {
@@ -539,20 +1184,26 @@
 
     if (typeof element.querySelectorAll === "function") {
       for (const target of element.querySelectorAll(EDITABLE_DIRECTION_TARGET_SELECTOR)) {
-        if (!target.closest(`${CONTROL_AREA_SELECTOR}, ${EDIT_COMPOSER_EXCLUDED_SELECTOR}, .${CONTROL_CLASS}`)) {
+        if (!isEditableDirectionExcluded(target, isResponseChangeComposer(getEditingHost(element) || element))) {
           targets.add(target);
         }
       }
+    }
+
+    for (const target of getKeyboardShortcutDirectionTargets(element)) {
+      targets.add(target);
     }
 
     return targets;
   }
 
   function applyDirectionToEditableTree(element, direction) {
-    for (const target of getEditableDirectionTargets(element)) {
-      applyDirection(target, COMPOSER_CLASS, direction);
-      applyInlineDirectionStyle(target, direction);
+    const targets = [...getEditableDirectionTargets(element)];
+    for (const target of targets) {
+      applyParagraphDirection(target, direction);
     }
+    applyDirectionLikeKeyboardShortcut(element, direction);
+    debugDirectionApplied(element, direction, targets);
   }
 
   function applyDirectionToActiveEditables(root = document) {
@@ -561,6 +1212,22 @@
         const direction = applyDirection(element, COMPOSER_CLASS);
         applyDirectionToEditableTree(element, direction);
       }
+    }
+  }
+
+  function applyDirectionToFocusedResponseChangeMenus(root = document) {
+    const activeMenu = document.activeElement instanceof Element
+      ? responseChangeMenuContainerFor(document.activeElement)
+      : null;
+
+    for (const element of elementsMatching(root, RESPONSE_CHANGE_MENU_SELECTOR, true)) {
+      if (isFocusedResponseChangeMenu(element)) {
+        applyDirectionToResponseChangeMenu(element);
+      }
+    }
+
+    if (activeMenu && isFocusedResponseChangeMenu(activeMenu)) {
+      applyDirectionToResponseChangeMenu(activeMenu);
     }
   }
 
@@ -670,6 +1337,18 @@
       }
     }
 
+    for (const menu of document.querySelectorAll(RESPONSE_CHANGE_MENU_SELECTOR)) {
+      if (isFocusedResponseChangeMenu(menu)) {
+        currentTargets.add(menu);
+        for (const target of getResponseChangePseudoInputTargets(menu)) {
+          currentTargets.add(target);
+        }
+        for (const row of responseChangeMenuNativeTargets(menu)) {
+          currentTargets.add(row);
+        }
+      }
+    }
+
     for (const message of document.querySelectorAll(MESSAGE_SELECTOR)) {
       if (isMessageElement(message)) {
         for (const target of getMessageTextTargets(message)) {
@@ -691,6 +1370,7 @@
       reconcileAppliedElements();
       applyDirectionToComposer(root);
       applyDirectionToActiveEditables(root);
+      applyDirectionToFocusedResponseChangeMenus(root);
       applyDirectionToMessages(root);
       ensureDirectionControl();
     } catch (_error) {
@@ -763,37 +1443,75 @@
   }
 
   function handleComposerInput(event) {
-    const composer = event.target instanceof Element ? event.target.closest(COMPOSER_SELECTOR) : null;
-    if (composer && isComposerElement(composer) && selectedMode === "auto") {
+    const target = event.target instanceof Element ? event.target : null;
+    const composer = target ? target.closest(COMPOSER_SELECTOR) : null;
+    const menu = target ? responseChangeMenuContainerFor(target) : null;
+    if (composer) {
+      debugEditableContext(composer, "input");
+    } else if (menu) {
+      debugEditableContext(menu, "input");
+    }
+    if (composer && isComposerElement(composer)) {
       const direction = applyDirection(composer, COMPOSER_CLASS);
       applyDirectionToEditableTree(composer, direction);
+    } else if (menu && isFocusedResponseChangeMenu(menu)) {
+      applyDirectionToResponseChangeMenu(menu);
     }
   }
 
   function handleComposerFocus(event) {
-    const composer = event.target instanceof Element ? event.target.closest(COMPOSER_SELECTOR) : null;
+    const target = event.target instanceof Element ? event.target : null;
+    const composer = target ? target.closest(COMPOSER_SELECTOR) : null;
+    const menu = target ? responseChangeMenuContainerFor(target) : null;
+    if (composer) {
+      debugEditableContext(composer, "focusin");
+    } else if (menu) {
+      debugEditableContext(menu, "focusin");
+    }
     if (composer && isComposerElement(composer)) {
       const direction = applyDirection(composer, COMPOSER_CLASS);
       applyDirectionToEditableTree(composer, direction);
+    } else if (menu && isFocusedResponseChangeMenu(menu)) {
+      applyDirectionToResponseChangeMenu(menu);
     }
   }
 
+  function shortcutModeFromEvent(event) {
+    if (event.code === "ShiftRight") {
+      return "rtl";
+    }
+
+    if (event.code === "ShiftLeft") {
+      return "ltr";
+    }
+
+    if (event.shiftKey && event.code === "KeyA") {
+      return "auto";
+    }
+
+    return null;
+  }
+
   function handleKeyboardShortcut(event) {
-    const composer = event.target instanceof Element ? event.target.closest(COMPOSER_SELECTOR) : null;
-    if (!composer || !isComposerElement(composer) || !event.ctrlKey) {
+    const target = event.target instanceof Element ? event.target : null;
+    const composer = target ? target.closest(COMPOSER_SELECTOR) : null;
+    const menu = target ? responseChangeMenuContainerFor(target) : null;
+    const focusedResponseMenu = menu && isFocusedResponseChangeMenu(menu);
+
+    if (focusedResponseMenu) {
+      applyDirectionToResponseChangeMenu(menu);
+    }
+
+    if (!event.ctrlKey) {
       return;
     }
 
-    let mode = null;
-    if (event.code === "ShiftRight") {
-      mode = "rtl";
-    } else if (event.code === "ShiftLeft") {
-      mode = "ltr";
-    } else if (event.shiftKey && event.code === "KeyA") {
-      mode = "auto";
+    const mode = shortcutModeFromEvent(event);
+    if (!mode) {
+      return;
     }
 
-    if (mode) {
+    if ((composer && isComposerElement(composer)) || focusedResponseMenu) {
       event.preventDefault();
       setMode(mode);
     }
@@ -837,6 +1555,7 @@
     }
   }
 
+  installDebugInspector();
   applyDirections(document);
   loadMode();
   document.addEventListener("input", handleComposerInput, true);

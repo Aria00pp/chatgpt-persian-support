@@ -26,6 +26,14 @@ for (const helper of [
   "isMainComposer",
   "isInlineEditComposer",
   "isRetryComposer",
+  "isResponseChangeComposer",
+  "isFocusedResponseChangeMenu",
+  "getResponseChangePseudoInputTargets",
+  "applyDirectionToResponseChangeMenu",
+  "isAskToChangeResponseInput",
+  "hasResponseChangeMenuSignals",
+  "isFocusedResponseChangeInput",
+  "hasResponseChangeContext",
   "isUserMessageEditComposer",
   "isActiveEditableComposer",
   "isLikelyChatEditable",
@@ -33,6 +41,13 @@ for (const helper of [
   "getEditableDirectionTargets",
   "applyDirectionToEditableTree",
   "applyInlineDirectionStyle",
+  "getEditingHost",
+  "getActiveEditableBlock",
+  "applyParagraphDirection",
+  "applyDirectionLikeKeyboardShortcut",
+  "isEditableDirectionExcluded",
+  "debugEditableContext",
+  "installDebugInspector",
   "handleComposerFocus"
 ]) {
   assert(contentJs.includes(`function ${helper}`), `helper missing: ${helper}`);
@@ -41,12 +56,38 @@ for (const helper of [
 assert(contentJs.includes("chrome.storage.local"), "mode storage must continue using chrome.storage.local");
 assert(contentJs.includes("createDirectionControl"), "direction control must still exist");
 assert(!contentJs.includes('document.createElement("bdi")'), "rendered message text must not be wrapped in bdi");
+assert(!contentJs.includes("document.createElement('bdi')"), "rendered message text must not be wrapped in bdi");
 assert(!contentJs.includes("textNode.replaceWith"), "rendered message text nodes must not be replaced");
+assert(!/\.replaceWith\s*\(/.test(contentJs), "text nodes or elements must not be replaced via replaceWith");
 assert(!contentJs.includes("isolateInlineBidiRuns"), "JS inline bidi mutation pass must stay disabled");
+assert(!contentJs.includes("execCommand"), "must not use deprecated editing commands for direction changes");
 assert(contentJs.includes('document.addEventListener("focusin", handleComposerFocus, true)'), "focusin handler must apply edit composer direction immediately");
 assert(contentJs.includes("EDITABLE_DIRECTION_TARGET_SELECTOR"), "editable tree direction targets must be defined");
 assert(contentJs.includes("applyDirectionToActiveEditables(root)"), "full apply pass must scan active editables");
-assert(contentJs.includes("applyInlineDirectionStyle(target, direction)"), "inline style forcing must be scoped through editable tree targets");
+assert(contentJs.includes("applyParagraphDirection(target, direction)"), "inline style forcing must be scoped through editable tree targets");
+assert(contentJs.includes("isResponseChangeComposer(element)"), "response-change composer must be part of narrow composer detection");
+assert(contentJs.includes("hasResponseChangeMenuSignals(container)"), "response-change detection must use retry/search-web menu state");
+assert(contentJs.includes("isFocusedResponseChangeInput(element)"), "focused response-change input must be detected after placeholder text disappears");
+assert(/return isAskToChangeResponseInput\(element\) \|\| isFocusedResponseChangeInput\(element\) \|\| hasResponseChangeContext\(element\)/.test(contentJs), "response-change detection must not rely only on Ask to change response placeholder text");
+assert(contentJs.includes('document.addEventListener("input", handleComposerInput, true)'), "input handler must keep Auto mode live for composers");
+assert(contentJs.includes('element.style.unicodeBidi = "plaintext"'), "confirmed editable targets should force plaintext bidi behavior inline");
+assert(contentJs.includes("applyDirectionLikeKeyboardShortcut(element, direction)"), "keyboard-like paragraph direction helper must be used for editable targets");
+assert(contentJs.includes("window.getSelection"), "active selection/block helper must inspect the current editable block");
+assert(contentJs.includes("getKeyboardShortcutDirectionTargets(element)"), "inline style forcing must remain scoped to editable/composer targets");
+assert(contentJs.includes("let debugEnabled = false"), "diagnostic mode must be disabled by default");
+assert(contentJs.includes('document.addEventListener("cgpt-rtl-debug-enable", handleDebugEvent)'), "debug enable event listener must be installed");
+assert(contentJs.includes('document.addEventListener("cgpt-rtl-debug-disable", handleDebugEvent)'), "debug disable event listener must be installed");
+assert(contentJs.includes('document.addEventListener("cgpt-rtl-inspect-active", handleDebugEvent)'), "manual inspect event listener must be installed");
+assert(contentJs.includes('document.documentElement.dataset.cgptRtlDebug === "1"'), "diagnostics should also support documentElement dataset opt-in");
+assert(contentJs.includes('debugEditableContext(composer, "focusin")'), "focusin diagnostics must inspect prompt-like editables when enabled");
+assert(contentJs.includes('debugEditableContext(composer, "input")'), "input diagnostics must inspect prompt-like editables when enabled");
+assert(contentJs.includes("debugDirectionApplied(element, direction, targets)"), "response-change direction application must log targets when diagnostics are enabled");
+assert(contentJs.includes("debugResponseChangeMenuApplied(menu, direction, directionTargets, menuItemRows)"), "focused menu direction application must log targets when diagnostics are enabled");
+assert(contentJs.includes("pseudoInputTargets"), "diagnostics must report response-change pseudo-input targets");
+assert(contentJs.includes("excludedMenuItemRows"), "diagnostics must report excluded/restored response-change menu rows");
+assert(contentJs.includes("applyDirectionToFocusedResponseChangeMenus(root)"), "apply pass must handle focused response-change menu pseudo-inputs");
+assert(contentJs.includes("console.info"), "diagnostics should log locally to the console only");
+assert(contentJs.includes("previewText(container && container.textContent, 500)"), "diagnostic container text must be limited");
 
 for (const selector of ["strong", "b", "em", "i", "span", "q", "a"]) {
   assert(contentCss.includes(selector), `inline formatting selector missing: ${selector}`);

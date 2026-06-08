@@ -64,6 +64,14 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] Edit a previous user message in LTR mode; the edit box is LTR and left-aligned for English text.
 - [ ] Edit a previous user message in Auto mode; direction updates live inside the edit box based on the edited text.
 - [ ] Retry/regenerate input flow receives the selected direction behavior.
+- [ ] Open the retry/try-again popup.
+- [ ] Click "Ask to change response".
+- [ ] In RTL mode, the response-change popup behaves the same as manually pressing Ctrl + ShiftRight.
+- [ ] In RTL mode, type Persian into the top input after the placeholder disappears; the caret starts on the right and Persian text extends naturally RTL.
+- [ ] In LTR mode, the response-change popup behaves the same as manually pressing Ctrl + ShiftLeft, and English text starts from the left.
+- [ ] In Auto mode, direction updates live in the Ask to change response box.
+- [ ] Type this in the Ask to change response box: `این پاسخ را با Auto mode و shortcut و input handler بهتر توضیح بده`.
+- [ ] "Try again" and "Search the web" menu items remain normal while only the response-change input changes direction.
 - [ ] Ctrl + Right Shift switches to RTL inside the composer.
 - [ ] Ctrl + Left Shift switches to LTR inside the composer.
 - [ ] Ctrl + Shift + A switches to Auto inside the composer.
@@ -86,6 +94,33 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] Upload, voice, send, copy, retry/regenerate, feedback, edit, and toolbar controls remain visually normal.
 - [ ] ChatGPT controls remain visually normal after switching modes.
 - [ ] Repeat the relevant checks on `https://chat.openai.com/` if that host is available for the account.
+
+## Debugging response-change popup detection
+
+Diagnostics are disabled by default and only print local console output when explicitly enabled. The content script listens for DOM events so commands from the normal page DevTools Console can trigger diagnostics despite Chrome's isolated content-script world.
+
+To inspect the response-change popup:
+
+1. Open DevTools Console.
+2. Run:
+   ```js
+   document.dispatchEvent(new CustomEvent("cgpt-rtl-debug-enable"));
+   ```
+3. Open the retry/try-again popup.
+4. Focus the top "Ask to change response" input.
+5. Run:
+   ```js
+   document.dispatchEvent(new CustomEvent("cgpt-rtl-inspect-active"));
+   ```
+6. Copy the printed diagnostic object, excluding any private text if needed.
+7. Disable diagnostics when done:
+   ```js
+   document.dispatchEvent(new CustomEvent("cgpt-rtl-debug-disable"));
+   ```
+
+Alternatively, set `document.documentElement.dataset.cgptRtlDebug = "1"` before focusing the input. The diagnostic limits nearby text previews and does not send, store, or transmit any chat content.
+
+If the diagnostic shows `activeElement` as `role="menu"` with `editingHost: null`, that is expected for ChatGPT's response-change pseudo-input. The extension handles that path by detecting the focused response-change menu and applying direction to the menu's top pseudo-input/display targets while restoring the `Try again` and `Search the web` rows to normal menu direction.
 
 ## Privacy
 
