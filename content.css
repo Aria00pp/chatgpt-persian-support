@@ -44,7 +44,6 @@
   text-align: left !important;
 }
 
-
 /* Inline formatting is isolated so mixed Persian-English prose stays readable without changing text. */
 .cgpt-dir-message :is(p, h1, h2, h3, h4, h5, h6, blockquote, li, dd, dt) :is(strong, b, em, i, span, q, a) {
   direction: inherit;
@@ -52,12 +51,48 @@
 }
 
 /* Technical content remains readable and keeps its expected LTR layout in every mode. */
-.cgpt-dir-message:is(pre, code, kbd, samp, textarea, table, math, .katex, .MathJax),
-.cgpt-dir-message :is(pre, code, kbd, samp, textarea, table, math, .katex, .MathJax),
+.cgpt-dir-message:is(pre, code, kbd, samp, textarea, math, .katex, .MathJax),
+.cgpt-dir-message :is(pre, code, kbd, samp, textarea, math, .katex, .MathJax),
 .cgpt-dir-message:is([class*="code"], [class*="Code"], [class*="syntax"], [class*="highlight"], [class*="editor"], [class*="Editor"], [class*="terminal" i]),
 .cgpt-dir-message :is([class*="code"], [class*="Code"], [class*="syntax"], [class*="highlight"], [class*="editor"], [class*="Editor"], [class*="terminal" i]),
 .cgpt-dir-message:is([role="grid"], [role="treegrid"]),
 .cgpt-dir-message :is([role="grid"], [role="treegrid"]) {
+  direction: ltr !important;
+  text-align: left !important;
+  unicode-bidi: isolate !important;
+}
+
+/* Tables use a separate layout direction for column order while each header/data cell gets its own text direction. */
+.cgpt-dir-table {
+  unicode-bidi: isolate !important;
+}
+
+.cgpt-dir-table.cgpt-dir-rtl {
+  direction: rtl !important;
+}
+
+.cgpt-dir-table.cgpt-dir-ltr {
+  direction: ltr !important;
+}
+
+.cgpt-dir-table .cgpt-dir-table-cell.cgpt-dir-rtl {
+  direction: rtl !important;
+  text-align: right !important;
+  unicode-bidi: isolate !important;
+}
+
+.cgpt-dir-table .cgpt-dir-table-cell.cgpt-dir-ltr {
+  direction: ltr !important;
+  text-align: left !important;
+  unicode-bidi: isolate !important;
+}
+
+.cgpt-dir-table .cgpt-dir-table-cell :is(strong, b, em, i, span, q, a) {
+  direction: inherit;
+  unicode-bidi: isolate;
+}
+
+.cgpt-dir-table .cgpt-dir-table-cell :is(code, kbd, samp) {
   direction: ltr !important;
   text-align: left !important;
   unicode-bidi: isolate !important;

@@ -7,6 +7,8 @@
   const APPLIED_CLASS = "cgpt-dir-applied";
   const COMPOSER_CLASS = "cgpt-dir-composer";
   const MESSAGE_CLASS = "cgpt-dir-message";
+  const TABLE_CLASS = "cgpt-dir-table";
+  const TABLE_CELL_CLASS = "cgpt-dir-table-cell";
   const CONTROL_CLASS = "cgpt-dir-control";
   const ACTIVE_CONTROL_CLASS = "cgpt-dir-control-active";
   const LEGACY_CLASSES = ["cgpt-rtl-applied", "cgpt-rtl-composer", "cgpt-rtl-message"];
@@ -418,9 +420,6 @@
 
     return isAskToChangeResponseInput(element) || isFocusedResponseChangeInput(element) || hasResponseChangeContext(element);
   }
-
-
-
 
   function responseChangeMenuContainerFor(element) {
     if (!(element instanceof Element)) {
@@ -1000,6 +999,105 @@
     return [authorRoleTarget || messageElement];
   }
 
+  function isTableElement(element) {
+    return Boolean(element && element.matches && element.matches("table"));
+  }
+
+  function getTableDirectionTargets(messageElement) {
+    return [...messageElement.querySelectorAll("table")]
+      .filter((tableElement) => shouldDirectionManageTable(tableElement));
+  }
+
+  function shouldDirectionManageTable(tableElement) {
+    if (!isTableElement(tableElement)) {
+      return false;
+    }
+
+    if (tableElement.closest("pre, code, kbd, samp, math, .katex, .MathJax, [class*='syntax'], [class*='highlight'], [class*='editor'], [class*='Editor'], [class*='terminal' i]")) {
+      return false;
+    }
+
+    if (tableElement.matches("[role='grid'], [role='treegrid']")) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function tableHeaderText(tableElement) {
+    const firstHeaderRow = tableElement.tHead && tableElement.tHead.rows.length > 0
+      ? tableElement.tHead.rows[0]
+      : [...tableElement.querySelectorAll("tr")].find((rowElement) => rowElement.querySelector("th"));
+
+    if (firstHeaderRow) {
+      const headerText = [...firstHeaderRow.querySelectorAll("th")]
+        .map((cellElement) => cellElement.textContent || "")
+        .join(" ")
+        .trim();
+
+      if (headerText) {
+        return headerText;
+      }
+    }
+
+    const firstRow = tableElement.querySelector("tr");
+    if (!firstRow) {
+      return "";
+    }
+
+    return [...firstRow.querySelectorAll("th, td")]
+      .map((cellElement) => cellElement.textContent || "")
+      .join(" ")
+      .trim();
+  }
+
+  function directionForTableLayout(tableElement) {
+    if (selectedMode === "rtl" || selectedMode === "ltr") {
+      return selectedMode;
+    }
+
+    const headerText = tableHeaderText(tableElement);
+    return detectDirectionFromText(headerText || tableElement.textContent);
+  }
+
+  function directionForTableCell(cellElement) {
+    return detectDirectionFromText(cellElement.textContent);
+  }
+
+  function applyStableDirectionToTable(tableElement, direction) {
+    if (!originalDirections.has(tableElement)) {
+      originalDirections.set(tableElement, tableElement.getAttribute("dir"));
+    }
+
+    clearDirectionClasses(tableElement);
+    tableElement.classList.add(APPLIED_CLASS, TABLE_CLASS, `cgpt-dir-${direction}`);
+    tableElement.setAttribute("dir", direction);
+  }
+
+  function applyDirectionToTableCell(cellElement) {
+    const direction = directionForTableCell(cellElement);
+    if (!originalDirections.has(cellElement)) {
+      originalDirections.set(cellElement, cellElement.getAttribute("dir"));
+    }
+
+    clearDirectionClasses(cellElement);
+    cellElement.classList.add(APPLIED_CLASS, TABLE_CELL_CLASS, `cgpt-dir-${direction}`);
+    cellElement.setAttribute("dir", direction);
+    applyInlineDirectionStyle(cellElement, direction);
+  }
+
+  function applyDirectionToTableCells(tableElement) {
+    if (!shouldDirectionManageTable(tableElement)) {
+      return;
+    }
+
+    const layoutDirection = directionForTableLayout(tableElement);
+    applyStableDirectionToTable(tableElement, layoutDirection);
+    for (const cellElement of tableElement.querySelectorAll("th, td")) {
+      applyDirectionToTableCell(cellElement);
+    }
+  }
+
   function strongDirectionForCharacter(character) {
     if (/[\u0590-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/u.test(character)) {
       return "rtl";
@@ -1132,7 +1230,6 @@
     return detectDirectionFromText(kind === COMPOSER_CLASS ? composerText(element) : element.textContent);
   }
 
-
   function clearDirectionClasses(element) {
     element.classList.remove(...DIRECTION_CLASSES, ...LEGACY_CLASSES);
   }
@@ -1173,7 +1270,6 @@
     element.style.unicodeBidi = originalStyle.unicodeBidi;
     originalInlineStyles.delete(element);
   }
-
 
   function isEditableDirectionExcluded(element, allowMenuAncestor = false) {
     const excludedSelector = allowMenuAncestor
@@ -1338,7 +1434,7 @@
       LEGACY_CLASSES.some((className) => element.classList.contains(className));
 
     restoreInlineDirectionStyle(element);
-    element.classList.remove(APPLIED_CLASS, COMPOSER_CLASS, MESSAGE_CLASS, ...DIRECTION_CLASSES, ...LEGACY_CLASSES);
+    element.classList.remove(APPLIED_CLASS, COMPOSER_CLASS, MESSAGE_CLASS, TABLE_CLASS, TABLE_CELL_CLASS, ...DIRECTION_CLASSES, ...LEGACY_CLASSES);
     if (hadDirectionClass && originalDirections.has(element)) {
       const originalDirection = originalDirections.get(element);
       if (originalDirection === null) {
@@ -1369,6 +1465,10 @@
 
       for (const target of getMessageTextTargets(messageElement)) {
         applyDirection(target, MESSAGE_CLASS);
+      }
+
+      for (const tableElement of getTableDirectionTargets(messageElement)) {
+        applyDirectionToTableCells(tableElement);
       }
     }
   }
@@ -1455,6 +1555,12 @@
       if (isMessageElement(message)) {
         for (const target of getMessageTextTargets(message)) {
           currentTargets.add(target);
+        }
+        for (const tableElement of getTableDirectionTargets(message)) {
+          currentTargets.add(tableElement);
+          for (const cellElement of tableElement.querySelectorAll("th, td")) {
+            currentTargets.add(cellElement);
+          }
         }
       }
     }
