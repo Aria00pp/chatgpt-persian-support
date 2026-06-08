@@ -38,6 +38,13 @@
   text-align: left !important;
 }
 
+
+/* Inline formatting is isolated so mixed Persian-English prose stays readable without changing text. */
+.cgpt-dir-message :is(p, h1, h2, h3, h4, h5, h6, blockquote, li, dd, dt) :is(strong, b, em, i, span, q, a) {
+  direction: inherit;
+  unicode-bidi: isolate;
+}
+
 /* Technical content remains readable and keeps its expected LTR layout in every mode. */
 .cgpt-dir-message:is(pre, code, kbd, samp, textarea, table, math, .katex, .MathJax),
 .cgpt-dir-message :is(pre, code, kbd, samp, textarea, table, math, .katex, .MathJax),

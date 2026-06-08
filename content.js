@@ -50,10 +50,33 @@
     "[data-testid*='prompt' i]"
   ].join(",");
 
+  const EDIT_RETRY_CONTAINER_SELECTOR = [
+    "form",
+    "[data-testid*='edit' i]",
+    "[data-testid*='composer' i]",
+    "[data-testid*='prompt' i]",
+    "[data-testid*='retry' i]",
+    "[data-testid*='regenerate' i]"
+  ].join(",");
+
   const COMPOSER_CONTROL_SELECTOR = [
     "button[type='submit']",
     "button[data-testid*='send' i]",
     "button[aria-label*='send' i]",
+    "button[data-testid*='submit' i]",
+    "button[aria-label*='submit' i]",
+    "button[data-testid*='save' i]",
+    "button[aria-label*='save' i]",
+    "button[data-testid*='update' i]",
+    "button[aria-label*='update' i]",
+    "button[data-testid*='confirm' i]",
+    "button[aria-label*='confirm' i]",
+    "button[data-testid*='done' i]",
+    "button[aria-label*='done' i]",
+    "button[data-testid*='retry' i]",
+    "button[aria-label*='retry' i]",
+    "button[data-testid*='regenerate' i]",
+    "button[aria-label*='regenerate' i]",
     "button[data-testid*='voice' i]",
     "button[aria-label*='voice' i]",
     "button[data-testid*='upload' i]",
@@ -140,11 +163,33 @@
 
   function normalizedInputHint(element) {
     return [
+      element.id,
       element.getAttribute("aria-label"),
       element.getAttribute("placeholder"),
       element.getAttribute("data-placeholder"),
-      element.getAttribute("name")
+      element.getAttribute("data-testid"),
+      element.getAttribute("name"),
+      element.getAttribute("type")
     ].filter(Boolean).join(" ").toLowerCase();
+  }
+
+  function normalizedContextHint(element, container) {
+    const hints = [normalizedInputHint(element)];
+    let current = element.parentElement;
+
+    while (current && current !== container.parentElement) {
+      hints.push(normalizedInputHint(current));
+      if (current === container) {
+        break;
+      }
+      current = current.parentElement;
+    }
+
+    for (const control of container.querySelectorAll("button, [role='button'], input[type='submit']")) {
+      hints.push(normalizedInputHint(control), control.textContent || "");
+    }
+
+    return hints.filter(Boolean).join(" ").toLowerCase();
   }
 
   function isExcludedUiArea(element) {
@@ -161,6 +206,18 @@
     );
   }
 
+  function isPromptLikeEditable(element) {
+    if (!element.matches(COMPOSER_SELECTOR) || isExcludedUiArea(element)) {
+      return false;
+    }
+
+    if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+      return !element.disabled && !element.readOnly && element.type !== "search";
+    }
+
+    return element.isContentEditable || element.getAttribute("role") === "textbox";
+  }
+
   function getComposerContainer(element) {
     if (isExcludedUiArea(element)) {
       return null;
@@ -174,19 +231,11 @@
     return container;
   }
 
-  function isLikelyComposerContainer(element) {
-    if (element.id === "prompt-textarea" && element.closest("main") && !isExcludedUiArea(element)) {
-      return true;
-    }
-
-    const container = getComposerContainer(element);
-    if (!container) {
-      return false;
-    }
-
+  function hasPromptContext(element, container) {
+    const contextHint = normalizedContextHint(element, container);
     const hasComposerControl = Boolean(container.querySelector(COMPOSER_CONTROL_SELECTOR));
-    const hasMessageHint = /message|prompt|ask|chatgpt|پیام|پرسش|سؤال|سوال|بنویس|اكتب|رسالة/.test(
-      normalizedInputHint(element)
+    const hasMessageHint = /message|prompt|ask|chatgpt|reply|write|پیام|پرسش|سؤال|سوال|بنویس|اكتب|رسالة/.test(
+      contextHint
     );
     const hasSemanticContainer = container.matches(
       "[data-testid*='composer' i], [data-testid*='prompt' i]"
@@ -195,16 +244,72 @@
     return hasComposerControl || hasMessageHint || hasSemanticContainer;
   }
 
+  function isMainComposer(element) {
+    if (!isPromptLikeEditable(element)) {
+      return false;
+    }
+
+    if (element.closest("[data-message-author-role], main article")) {
+      return false;
+    }
+
+    if (element.id === "prompt-textarea" && element.closest("main")) {
+      return true;
+    }
+
+    const container = getComposerContainer(element);
+    return Boolean(container && hasPromptContext(element, container));
+  }
+
+  function isInlineEditComposer(element) {
+    if (!isPromptLikeEditable(element)) {
+      return false;
+    }
+
+    const article = element.closest("main article, [data-message-author-role]");
+    if (!article || isExcludedUiArea(article)) {
+      return false;
+    }
+
+    const container = element.closest(EDIT_RETRY_CONTAINER_SELECTOR) || article;
+    const contextHint = normalizedContextHint(element, container);
+    const hasEditSignal = /\b(edit|editing|update|save|submit|send|confirm|done|cancel|message|prompt)\b|ویرایش|ذخیره|ارسال|لغو|پیام/.test(
+      contextHint
+    );
+    const hasEditControls = Boolean(container.querySelector(COMPOSER_CONTROL_SELECTOR));
+    const closeToEditForm = Boolean(element.closest("form")) && hasEditControls;
+
+    return hasEditSignal && (hasEditControls || closeToEditForm || container !== article);
+  }
+
+  function isRetryComposer(element) {
+    if (!isPromptLikeEditable(element)) {
+      return false;
+    }
+
+    const container = element.closest(EDIT_RETRY_CONTAINER_SELECTOR) || getComposerContainer(element);
+    if (!container || !container.closest("main") || isExcludedUiArea(container)) {
+      return false;
+    }
+
+    const contextHint = normalizedContextHint(element, container);
+    const hasRetrySignal = /\b(retry|regenerate|again|resubmit|submit|send|prompt|message)\b|تلاش|دوباره|بازسازی|ارسال|پیام/.test(
+      contextHint
+    );
+
+    return hasRetrySignal && Boolean(container.querySelector(COMPOSER_CONTROL_SELECTOR));
+  }
+
+  function isLikelyComposerContainer(element) {
+    return isMainComposer(element) || isInlineEditComposer(element) || isRetryComposer(element);
+  }
+
   function isMessageElement(element) {
     return element.matches(MESSAGE_SELECTOR);
   }
 
   function isComposerElement(element) {
-    if (element.closest(`.${MESSAGE_CLASS}, [data-message-author-role], main article`)) {
-      return false;
-    }
-
-    return isLikelyComposerContainer(element);
+    return isMainComposer(element) || isInlineEditComposer(element) || isRetryComposer(element);
   }
 
   function topLevelTargets(elements) {
@@ -356,7 +461,7 @@
   }
 
   function ensureDirectionControl() {
-    const composers = [...document.querySelectorAll(COMPOSER_SELECTOR)].filter(isComposerElement);
+    const composers = [...document.querySelectorAll(COMPOSER_SELECTOR)].filter(isMainComposer);
     const composer = composers[0];
     if (!composer) {
       return;
