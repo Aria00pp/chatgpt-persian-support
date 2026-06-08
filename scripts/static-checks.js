@@ -43,6 +43,8 @@ for (const helper of [
   "applyParagraphDirection",
   "applyDirectionLikeKeyboardShortcut",
   "isEditableDirectionExcluded",
+  "debugEditableContext",
+  "installDebugInspector",
   "handleComposerFocus"
 ]) {
   assert(contentJs.includes(`function ${helper}`), `helper missing: ${helper}`);
@@ -69,6 +71,10 @@ assert(contentJs.includes('element.style.unicodeBidi = "plaintext"'), "confirmed
 assert(contentJs.includes("applyDirectionLikeKeyboardShortcut(element, direction)"), "keyboard-like paragraph direction helper must be used for editable targets");
 assert(contentJs.includes("window.getSelection"), "active selection/block helper must inspect the current editable block");
 assert(contentJs.includes("getKeyboardShortcutDirectionTargets(element)"), "inline style forcing must remain scoped to editable/composer targets");
+assert(contentJs.includes("window.__CGPT_RTL_DEBUG"), "debug logging must require an explicit global opt-in flag");
+assert(contentJs.includes("window.__CGPT_RTL_INSPECT_ACTIVE"), "manual active editable inspector must be exposed for local diagnostics");
+assert(contentJs.includes("console.info"), "diagnostics should log locally to the console only");
+assert(contentJs.includes("previewText(container && container.textContent, 500)"), "diagnostic container text must be limited");
 
 for (const selector of ["strong", "b", "em", "i", "span", "q", "a"]) {
   assert(contentCss.includes(selector), `inline formatting selector missing: ${selector}`);

@@ -95,6 +95,22 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] ChatGPT controls remain visually normal after switching modes.
 - [ ] Repeat the relevant checks on `https://chat.openai.com/` if that host is available for the account.
 
+## Debugging response-change popup detection
+
+Diagnostics are disabled by default and only print local console output when explicitly enabled. To inspect the actual focused response-change input structure:
+
+1. Open DevTools Console.
+2. Run:
+   ```js
+   window.__CGPT_RTL_DEBUG = true
+   ```
+3. Focus the "Ask to change response" input in the retry/try-again popup.
+4. Or run:
+   ```js
+   window.__CGPT_RTL_INSPECT_ACTIVE()
+   ```
+5. Copy the console object, excluding any private text if needed. The diagnostic limits nearby text previews and does not send, store, or transmit any chat content.
+
 ## Privacy
 
 This extension stores only one local preference: the selected direction mode (`auto`, `rtl`, or `ltr`) in `chrome.storage.local`. It does **not** store prompt text, message text, chat content, or any other user data. It makes no network requests and contains no telemetry, analytics, or tracking.

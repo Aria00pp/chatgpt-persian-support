@@ -407,6 +407,115 @@
     return isAskToChangeResponseInput(element) || isFocusedResponseChangeInput(element) || hasResponseChangeContext(element);
   }
 
+
+  function previewText(text, limit) {
+    return String(text || "").replace(/\s+/g, " ").trim().slice(0, limit);
+  }
+
+  function elementSummary(element) {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    return {
+      tag: element.tagName,
+      id: element.id || "",
+      class: typeof element.className === "string" ? element.className : String(element.getAttribute("class") || ""),
+      role: element.getAttribute("role") || "",
+      dataTestid: element.getAttribute("data-testid") || "",
+      dir: element.getAttribute("dir") || "",
+      styleDirection: element.style.direction || "",
+      textPreview: previewText(element.textContent, 120)
+    };
+  }
+
+  function closestElementSummary(element, selector) {
+    return element instanceof Element ? elementSummary(element.closest(selector)) : null;
+  }
+
+  function isFloatingDebugContext(element) {
+    if (!isPromptLikeEditable(element, true)) {
+      return false;
+    }
+
+    const popupContainer = element.closest(RESPONSE_CHANGE_CONTEXT_SELECTOR);
+    if (popupContainer) {
+      return true;
+    }
+
+    const container = responseChangeContainerFor(element);
+    if (!container) {
+      return false;
+    }
+
+    const style = window.getComputedStyle ? window.getComputedStyle(container) : null;
+    return hasResponseChangeMenuSignals(container) || Boolean(style && ["fixed", "absolute", "sticky"].includes(style.position));
+  }
+
+  function debugEditableContext(element, reason, force = false) {
+    if (!(element instanceof Element) || (!force && (!window.__CGPT_RTL_DEBUG || !isFloatingDebugContext(element)))) {
+      return;
+    }
+
+    const container = responseChangeContainerFor(element);
+    const active = document.activeElement instanceof Element ? document.activeElement : null;
+    const parentChain = [];
+    let current = element;
+    for (let depth = 0; current && depth < 8; depth += 1) {
+      parentChain.push(elementSummary(current));
+      current = current.parentElement;
+    }
+
+    const diagnostic = {
+      reason,
+      isResponseChangeComposer: isResponseChangeComposer(element),
+      isPromptLikeEditableAllowExcluded: isPromptLikeEditable(element, true),
+      tagName: element.tagName,
+      id: element.id || "",
+      className: typeof element.className === "string" ? element.className : String(element.getAttribute("class") || ""),
+      role: element.getAttribute("role") || "",
+      dir: element.getAttribute("dir") || "",
+      styleDirection: element.style.direction || "",
+      styleTextAlign: element.style.textAlign || "",
+      styleUnicodeBidi: element.style.unicodeBidi || "",
+      isContentEditable: element.isContentEditable,
+      placeholder: element.getAttribute("placeholder") || "",
+      ariaLabel: element.getAttribute("aria-label") || "",
+      dataPlaceholder: element.getAttribute("data-placeholder") || "",
+      dataTestid: element.getAttribute("data-testid") || "",
+      activeElement: active ? {
+        tag: active.tagName,
+        id: active.id || "",
+        class: typeof active.className === "string" ? active.className : String(active.getAttribute("class") || ""),
+        role: active.getAttribute("role") || ""
+      } : null,
+      closestForm: closestElementSummary(element, "form"),
+      closestRoleMenuDialogPopover: closestElementSummary(element, "[role='menu'], [role='dialog'], [role='alertdialog'], [popover]"),
+      closestRadixMenuPopupWrapper: closestElementSummary(element, "[data-radix-menu-content], [data-radix-popper-content-wrapper], [data-testid*='menu' i], [data-testid*='popover' i]"),
+      parentChain,
+      containerTextPreview: previewText(container && container.textContent, 500),
+      checks: {
+        isAskToChangeResponseInput: isAskToChangeResponseInput(element),
+        isFocusedResponseChangeInput: isFocusedResponseChangeInput(element),
+        hasResponseChangeContext: hasResponseChangeContext(element),
+        hasResponseChangeMenuSignals: hasResponseChangeMenuSignals(container),
+        isActiveEditableComposer: isActiveEditableComposer(element),
+        isComposerElement: isComposerElement(element)
+      }
+    };
+
+    console.info("[ChatGPT Persian Direction] editable debug", diagnostic);
+  }
+
+  function inspectActiveEditableContext() {
+    const active = document.activeElement instanceof Element ? document.activeElement : null;
+    const editable = active ? active.closest(COMPOSER_SELECTOR) || active : null;
+    debugEditableContext(editable, "manual", true);
+  }
+
+  function installDebugInspector() {
+    window.__CGPT_RTL_INSPECT_ACTIVE = inspectActiveEditableContext;
+  }
   function getComposerContainer(element) {
     if (isExcludedUiArea(element)) {
       return null;
@@ -1035,6 +1144,9 @@
 
   function handleComposerInput(event) {
     const composer = event.target instanceof Element ? event.target.closest(COMPOSER_SELECTOR) : null;
+    if (composer) {
+      debugEditableContext(composer, "input");
+    }
     if (composer && isComposerElement(composer)) {
       const direction = applyDirection(composer, COMPOSER_CLASS);
       applyDirectionToEditableTree(composer, direction);
@@ -1043,6 +1155,9 @@
 
   function handleComposerFocus(event) {
     const composer = event.target instanceof Element ? event.target.closest(COMPOSER_SELECTOR) : null;
+    if (composer) {
+      debugEditableContext(composer, "focusin");
+    }
     if (composer && isComposerElement(composer)) {
       const direction = applyDirection(composer, COMPOSER_CLASS);
       applyDirectionToEditableTree(composer, direction);
@@ -1082,6 +1197,11 @@
           scheduleApply(mutation.target instanceof Element ? mutation.target : mutation.target.parentElement);
         }
       }
+
+      const activeComposer = document.activeElement instanceof Element ? document.activeElement.closest(COMPOSER_SELECTOR) : null;
+      if (activeComposer) {
+        debugEditableContext(activeComposer, "mutation");
+      }
     });
 
     observer.observe(target, { childList: true, characterData: true, subtree: true });
@@ -1108,6 +1228,7 @@
     }
   }
 
+  installDebugInspector();
   applyDirections(document);
   loadMode();
   document.addEventListener("input", handleComposerInput, true);
