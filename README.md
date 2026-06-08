@@ -56,6 +56,10 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] RTL mode makes Persian typing start from the right.
 - [ ] LTR mode makes English typing start from the left.
 - [ ] Auto mode makes Persian-first composer text RTL.
+- [ ] Auto mode: `PR 5: edit mode شد و مشکل پیام‌ها رفع شد.` is RTL/readable.
+- [ ] Auto mode: `PR 5 fixes edit mode and improves message handling.` is LTR/readable.
+- [ ] RTL mode: `PR 7: popup مربوط به Ask to change response merge شد.` remains RTL/readable.
+- [ ] Composer typing with an English prefix followed by Persian remains readable in RTL mode.
 - [ ] Auto mode makes English-first composer text LTR.
 - [ ] Edit a previous user message in RTL mode; the edit box is RTL and right-aligned.
 - [ ] Click the edit pencil in RTL mode; the edit text starts from the right immediately.
@@ -85,6 +89,8 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] Long normal messages are not truncated.
 - [ ] Streaming messages are not truncated.
 - [ ] No JS text-node wrapping is used on rendered ChatGPT messages.
+- [ ] Response-change popup still works after typing mixed Persian-English text.
+- [ ] Edit mode still works after typing mixed Persian-English text.
 - [ ] Code blocks remain LTR and left-aligned in all modes.
 - [ ] Inline code remains LTR and readable.
 - [ ] Tables remain LTR and left-aligned.

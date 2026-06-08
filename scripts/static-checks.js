@@ -40,6 +40,9 @@ for (const helper of [
   "applyDirectionToActiveEditables",
   "getEditableDirectionTargets",
   "applyDirectionToEditableTree",
+  "getStrongDirectionStats",
+  "isShortLatinPrefixBeforeRtl",
+  "detectDirectionFromText",
   "applyInlineDirectionStyle",
   "getEditingHost",
   "getActiveEditableBlock",
@@ -70,7 +73,12 @@ assert(contentJs.includes("hasResponseChangeMenuSignals(container)"), "response-
 assert(contentJs.includes("isFocusedResponseChangeInput(element)"), "focused response-change input must be detected after placeholder text disappears");
 assert(/return isAskToChangeResponseInput\(element\) \|\| isFocusedResponseChangeInput\(element\) \|\| hasResponseChangeContext\(element\)/.test(contentJs), "response-change detection must not rely only on Ask to change response placeholder text");
 assert(contentJs.includes('document.addEventListener("input", handleComposerInput, true)'), "input handler must keep Auto mode live for composers");
-assert(contentJs.includes('element.style.unicodeBidi = "plaintext"'), "confirmed editable targets should force plaintext bidi behavior inline");
+assert(contentJs.includes('element.style.unicodeBidi = "isolate"'), "confirmed editable targets should isolate bidi behavior inline without re-resolving paragraph direction");
+assert(!contentJs.includes('element.style.unicodeBidi = "plaintext"'), "editable targets must not force plaintext bidi broadly");
+assert(!contentCss.includes("unicode-bidi: plaintext"), "forced direction CSS must not use plaintext bidi broadly");
+assert(contentJs.includes("stats.rtlCount >= stats.latinCount"), "direction detection must count RTL and Latin strong characters");
+assert(contentJs.includes("stats.firstRtlIndex > 50"), "direction detection must allow a short Latin prefix before early RTL text");
+assert(!/function detectDirectionFromText[\s\S]*?if \(\/\[A-Za-z\]\/[\s\S]*?return "ltr";[\s\S]*?if \(\/\[\\u0590-\\u08FF/.test(contentJs), "direction detection must not be immediate first-strong Latin/RTL returns only");
 assert(contentJs.includes("applyDirectionLikeKeyboardShortcut(element, direction)"), "keyboard-like paragraph direction helper must be used for editable targets");
 assert(contentJs.includes("window.getSelection"), "active selection/block helper must inspect the current editable block");
 assert(contentJs.includes("getKeyboardShortcutDirectionTargets(element)"), "inline style forcing must remain scoped to editable/composer targets");
