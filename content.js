@@ -197,13 +197,27 @@
     "[data-radix-popper-content-wrapper]"
   ].join(",");
 
+  const MESSAGE_OBSERVER_ROOT_MARGIN = "1200px 0px";
+  const MESSAGE_OBSERVER_MARGIN_PX = 1200;
+  const MAX_MESSAGES_PER_FRAME = 6;
+
   const pendingRoots = new Set();
   const originalDirections = new WeakMap();
   const originalInlineStyles = new WeakMap();
+  const detectedDirectionCache = new WeakMap();
+  const elementTextSignatureCache = new WeakMap();
+  const tableLayoutDirectionCache = new WeakMap();
+  const tableCellDirectionCache = new WeakMap();
   let selectedMode = DEFAULT_MODE;
   let debugEnabled = false;
   let fullScanScheduled = false;
   let scheduled = false;
+  let cleanupScheduled = false;
+  let messageObserver = null;
+  let directionQueueScheduled = false;
+  let perfStats = null;
+  const messageDirectionQueue = new Set();
+  const observedMessages = new WeakSet();
 
   function elementsMatching(root, selector, includeClosest = false) {
     const matches = new Set();
@@ -1056,33 +1070,20 @@
       return selectedMode;
     }
 
-    const headerText = tableHeaderText(tableElement);
-    return detectDirectionFromText(headerText || tableElement.textContent);
+    return cachedDirectionForTableLayout(tableElement);
   }
 
   function directionForTableCell(cellElement) {
-    return detectDirectionFromText(cellElement.textContent);
+    return cachedDirectionForTableCell(cellElement);
   }
 
   function applyStableDirectionToTable(tableElement, direction) {
-    if (!originalDirections.has(tableElement)) {
-      originalDirections.set(tableElement, tableElement.getAttribute("dir"));
-    }
-
-    clearDirectionClasses(tableElement);
-    tableElement.classList.add(APPLIED_CLASS, TABLE_CLASS, `cgpt-dir-${direction}`);
-    tableElement.setAttribute("dir", direction);
+    applyDirection(tableElement, TABLE_CLASS, direction);
   }
 
   function applyDirectionToTableCell(cellElement) {
     const direction = directionForTableCell(cellElement);
-    if (!originalDirections.has(cellElement)) {
-      originalDirections.set(cellElement, cellElement.getAttribute("dir"));
-    }
-
-    clearDirectionClasses(cellElement);
-    cellElement.classList.add(APPLIED_CLASS, TABLE_CELL_CLASS, `cgpt-dir-${direction}`);
-    cellElement.setAttribute("dir", direction);
+    applyDirection(cellElement, TABLE_CELL_CLASS, direction);
     applyInlineDirectionStyle(cellElement, direction);
   }
 
@@ -1094,6 +1095,9 @@
     const layoutDirection = directionForTableLayout(tableElement);
     applyStableDirectionToTable(tableElement, layoutDirection);
     for (const cellElement of tableElement.querySelectorAll("th, td")) {
+      if (perfStats) {
+        perfStats.cells += 1;
+      }
       applyDirectionToTableCell(cellElement);
     }
   }
@@ -1185,6 +1189,10 @@
   }
 
   function detectDirectionFromText(text, options = {}) {
+    if (perfStats) {
+      perfStats.detectCalls += 1;
+    }
+
     const stats = getStrongDirectionStats(text, options);
 
     if (stats.rtlCount === 0 && stats.latinCount === 0) {
@@ -1222,30 +1230,122 @@
     return element.textContent || "";
   }
 
+  function textSignatureFor(element, sampleLimit = 220, textOverride = null) {
+    const text = String(textOverride === null ? (element.textContent || "") : textOverride);
+    const tailLimit = Math.min(40, sampleLimit);
+    return [
+      text.length,
+      text.slice(0, sampleLimit),
+      text.length > sampleLimit ? text.slice(-tailLimit) : ""
+    ].join("::");
+  }
+
+  function cachedDirectionForTextElement(element, options = {}) {
+    const text = options.text === undefined
+      ? (options.kind === COMPOSER_CLASS ? composerText(element) : element.textContent || "")
+      : options.text;
+    const signature = textSignatureFor(element, options.sampleLimit || 220, text);
+
+    if (elementTextSignatureCache.get(element) === signature && detectedDirectionCache.has(element)) {
+      return detectedDirectionCache.get(element);
+    }
+
+    const direction = detectDirectionFromText(text, options);
+    elementTextSignatureCache.set(element, signature);
+    detectedDirectionCache.set(element, direction);
+    return direction;
+  }
+
+  function cachedDirectionForTableCell(cellElement) {
+    const signature = textSignatureFor(cellElement, 220);
+    const cached = tableCellDirectionCache.get(cellElement);
+    if (cached && cached.signature === signature) {
+      return cached.direction;
+    }
+
+    const direction = detectDirectionFromText(cellElement.textContent || "");
+    tableCellDirectionCache.set(cellElement, { signature, direction });
+    return direction;
+  }
+
+  function cachedDirectionForTableLayout(tableElement) {
+    const headerText = tableHeaderText(tableElement);
+    const text = headerText || tableElement.textContent || "";
+    const signature = textSignatureFor(tableElement, 220, text);
+    const cached = tableLayoutDirectionCache.get(tableElement);
+    if (cached && cached.signature === signature) {
+      return cached.direction;
+    }
+
+    const direction = detectDirectionFromText(text);
+    tableLayoutDirectionCache.set(tableElement, { signature, direction });
+    return direction;
+  }
+
   function directionFor(element, kind) {
     if (selectedMode !== "auto") {
       return selectedMode;
     }
 
-    return detectDirectionFromText(kind === COMPOSER_CLASS ? composerText(element) : element.textContent);
+    return cachedDirectionForTextElement(element, { kind });
   }
 
   function clearDirectionClasses(element) {
-    element.classList.remove(...DIRECTION_CLASSES, ...LEGACY_CLASSES);
+    const classesToRemove = [...DIRECTION_CLASSES, ...LEGACY_CLASSES].filter((className) => element.classList.contains(className));
+    if (classesToRemove.length > 0) {
+      element.classList.remove(...classesToRemove);
+    } else if (perfStats) {
+      perfStats.skippedWrites += 1;
+    }
   }
 
   function applyDirection(element, kind, forcedDirection = null) {
     const direction = forcedDirection || directionFor(element, kind);
-    if (!originalDirections.has(element)) {
-      originalDirections.set(element, element.getAttribute("dir"));
+    const desiredClasses = [APPLIED_CLASS, kind, `cgpt-dir-${selectedMode}`, `cgpt-dir-${direction}`];
+    const currentDir = element.getAttribute("dir");
+    const hasStaleDirectionClass = DIRECTION_CLASSES.some((className) => (
+      className !== `cgpt-dir-${selectedMode}` &&
+      className !== `cgpt-dir-${direction}` &&
+      element.classList.contains(className)
+    )) || LEGACY_CLASSES.some((className) => element.classList.contains(className));
+    const missingClass = desiredClasses.some((className) => !element.classList.contains(className));
+
+    if (currentDir === direction && !hasStaleDirectionClass && !missingClass) {
+      if (perfStats) {
+        perfStats.skippedWrites += 1;
+      }
+      return direction;
     }
-    clearDirectionClasses(element);
-    element.classList.add(APPLIED_CLASS, kind, `cgpt-dir-${selectedMode}`, `cgpt-dir-${direction}`);
-    element.setAttribute("dir", direction);
+
+    if (!originalDirections.has(element)) {
+      originalDirections.set(element, currentDir);
+    }
+
+    if (hasStaleDirectionClass) {
+      clearDirectionClasses(element);
+    }
+
+    for (const className of desiredClasses) {
+      if (!element.classList.contains(className)) {
+        element.classList.add(className);
+      }
+    }
+
+    if (currentDir !== direction) {
+      element.setAttribute("dir", direction);
+    }
     return direction;
   }
 
   function applyInlineDirectionStyle(element, direction) {
+    const textAlign = direction === "rtl" ? "right" : "left";
+    if (element.style.direction === direction && element.style.textAlign === textAlign && element.style.unicodeBidi === "isolate") {
+      if (perfStats) {
+        perfStats.skippedWrites += 1;
+      }
+      return;
+    }
+
     if (!originalInlineStyles.has(element)) {
       originalInlineStyles.set(element, {
         direction: element.style.direction,
@@ -1254,9 +1354,15 @@
       });
     }
 
-    element.style.direction = direction;
-    element.style.textAlign = direction === "rtl" ? "right" : "left";
-    element.style.unicodeBidi = "isolate";
+    if (element.style.direction !== direction) {
+      element.style.direction = direction;
+    }
+    if (element.style.textAlign !== textAlign) {
+      element.style.textAlign = textAlign;
+    }
+    if (element.style.unicodeBidi !== "isolate") {
+      element.style.unicodeBidi = "isolate";
+    }
   }
 
   function restoreInlineDirectionStyle(element) {
@@ -1463,11 +1569,18 @@
         continue;
       }
 
+      if (perfStats) {
+        perfStats.messages += 1;
+      }
+
       for (const target of getMessageTextTargets(messageElement)) {
         applyDirection(target, MESSAGE_CLASS);
       }
 
       for (const tableElement of getTableDirectionTargets(messageElement)) {
+        if (perfStats) {
+          perfStats.tables += 1;
+        }
         applyDirectionToTableCells(tableElement);
       }
     }
@@ -1573,26 +1686,222 @@
     }
   }
 
-  function applyDirections(root = document) {
+  function createPerfStats() {
+    return {
+      observedMessages: 0,
+      queuedMessages: 0,
+      processedMessages: 0,
+      skippedOffscreenMessages: 0,
+      messages: 0,
+      tables: 0,
+      cells: 0,
+      detectCalls: 0,
+      skippedWrites: 0
+    };
+  }
+
+  function withPerfStats(label, callback, details = {}) {
+    const previousPerfStats = perfStats;
+    const startedAt = debugEnabled && typeof performance !== "undefined" ? performance.now() : 0;
+    perfStats = debugEnabled ? createPerfStats() : null;
+
     try {
-      reconcileAppliedElements();
-      applyDirectionToComposer(root);
-      applyDirectionToActiveEditables(root);
-      applyDirectionToFocusedResponseChangeMenus(root);
-      applyDirectionToMessages(root);
-      ensureDirectionControl();
+      return callback();
     } catch (_error) {
       // ChatGPT can replace DOM subtrees while they are being inspected. A future
       // mutation or route event will retry without interrupting the page.
+      return undefined;
+    } finally {
+      if (debugEnabled && perfStats) {
+        console.debug("[cgpt-dir] " + label, {
+          elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
+          ...perfStats,
+          ...details
+        });
+      }
+      perfStats = previousPerfStats;
     }
   }
 
-  function scheduleApply(root = document) {
-    if (root === document || root === document.documentElement) {
+  function applyInteractiveDirections(root = document) {
+    return withPerfStats("interactive pass", () => {
+      applyDirectionToComposer(root);
+      applyDirectionToActiveEditables(root);
+      applyDirectionToFocusedResponseChangeMenus(root);
+      if (root === document) {
+        ensureDirectionControl();
+      }
+    }, { root: root === document ? "document" : root && root.nodeName });
+  }
+
+  function isMessageNearViewport(messageElement) {
+    if (!(messageElement instanceof Element) || !messageElement.isConnected) {
+      return false;
+    }
+
+    const rect = messageElement.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    return rect.bottom >= -MESSAGE_OBSERVER_MARGIN_PX && rect.top <= viewportHeight + MESSAGE_OBSERVER_MARGIN_PX;
+  }
+
+  function setupMessageIntersectionObserver() {
+    if (messageObserver || typeof IntersectionObserver !== "function") {
+      return;
+    }
+
+    messageObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          enqueueMessageForDirection(entry.target);
+        }
+      }
+    }, { root: null, rootMargin: MESSAGE_OBSERVER_ROOT_MARGIN, threshold: 0 });
+  }
+
+  function observeMessageForLazyDirection(messageElement) {
+    if (!(messageElement instanceof Element) || !isMessageElement(messageElement) || observedMessages.has(messageElement)) {
+      return;
+    }
+
+    observedMessages.add(messageElement);
+    if (perfStats) {
+      perfStats.observedMessages += 1;
+    }
+
+    if (messageObserver) {
+      messageObserver.observe(messageElement);
+    }
+
+    if (!messageObserver || isMessageNearViewport(messageElement)) {
+      enqueueMessageForDirection(messageElement);
+    }
+  }
+
+  function refreshObservedMessages(root = document) {
+    setupMessageIntersectionObserver();
+    for (const messageElement of elementsMatching(root, MESSAGE_SELECTOR, true)) {
+      observeMessageForLazyDirection(messageElement);
+    }
+  }
+
+  function enqueueMessageForDirection(messageElement) {
+    if (!(messageElement instanceof Element) || !messageElement.isConnected || !isMessageElement(messageElement)) {
+      return;
+    }
+
+    if (!messageDirectionQueue.has(messageElement)) {
+      messageDirectionQueue.add(messageElement);
+      if (perfStats) {
+        perfStats.queuedMessages += 1;
+      }
+    }
+
+    if (directionQueueScheduled) {
+      return;
+    }
+
+    directionQueueScheduled = true;
+    requestAnimationFrame(processDirectionQueue);
+  }
+
+  function processDirectionQueue() {
+    directionQueueScheduled = false;
+    withPerfStats("message queue", () => {
+      let processed = 0;
+      for (const messageElement of [...messageDirectionQueue]) {
+        messageDirectionQueue.delete(messageElement);
+        if (!messageElement.isConnected) {
+          continue;
+        }
+
+        if (!isMessageNearViewport(messageElement)) {
+          if (perfStats) {
+            perfStats.skippedOffscreenMessages += 1;
+          }
+          continue;
+        }
+
+        applyDirectionToMessages(messageElement);
+        processed += 1;
+        if (perfStats) {
+          perfStats.processedMessages += 1;
+        }
+
+        if (processed >= MAX_MESSAGES_PER_FRAME) {
+          break;
+        }
+      }
+
+      if (messageDirectionQueue.size > 0) {
+        directionQueueScheduled = true;
+        requestAnimationFrame(processDirectionQueue);
+      }
+    }, { queuedMessages: messageDirectionQueue.size });
+  }
+
+  function applyDirectionToVisibleMessages(root = document) {
+    return withPerfStats("visible message refresh", () => {
+      refreshObservedMessages(root);
+      for (const messageElement of elementsMatching(root, MESSAGE_SELECTOR, true)) {
+        if (isMessageNearViewport(messageElement)) {
+          enqueueMessageForDirection(messageElement);
+        } else if (perfStats) {
+          perfStats.skippedOffscreenMessages += 1;
+        }
+      }
+    }, { root: root === document ? "document" : root && root.nodeName });
+  }
+
+  function applyDirections(root = document, options = {}) {
+    return withPerfStats("apply pass", () => {
+      if (options.fullReconcile) {
+        reconcileAppliedElements();
+      }
+      applyDirectionToComposer(root);
+      applyDirectionToActiveEditables(root);
+      applyDirectionToFocusedResponseChangeMenus(root);
+      if (options.includeMessages || root !== document) {
+        applyDirectionToMessages(root);
+      }
+      if (root === document || options.fullReconcile) {
+        ensureDirectionControl();
+      }
+    }, {
+      root: root === document ? "document" : root && root.nodeName,
+      fullReconcile: Boolean(options.fullReconcile)
+    });
+  }
+
+  function scheduleIdleWork(callback, timeout = 3000) {
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(callback, { timeout });
+    } else {
+      setTimeout(callback, timeout);
+    }
+  }
+
+  function scheduleCleanup() {
+    if (cleanupScheduled) {
+      return;
+    }
+
+    cleanupScheduled = true;
+    scheduleIdleWork(() => {
+      cleanupScheduled = false;
+      applyInteractiveDirections(document);
+      refreshObservedMessages(document);
+      applyDirectionToVisibleMessages(document);
+    }, 3000);
+  }
+
+  function scheduleApply(root = document, options = {}) {
+    const fullScan = Boolean(options.fullScan) || root === document || root === document.documentElement;
+    if (fullScan) {
       fullScanScheduled = true;
       pendingRoots.clear();
     } else if (!fullScanScheduled && root instanceof Element) {
       pendingRoots.add(root);
+      scheduleCleanup();
     }
 
     if (scheduled) {
@@ -1606,14 +1915,22 @@
       if (fullScanScheduled) {
         fullScanScheduled = false;
         pendingRoots.clear();
-        applyDirections(document);
+        applyInteractiveDirections(document);
+        applyDirectionToVisibleMessages(document);
+        scheduleCleanup();
         return;
       }
 
       const roots = [...pendingRoots];
       pendingRoots.clear();
       for (const pendingRoot of roots) {
-        applyDirections(pendingRoot.isConnected ? pendingRoot : document);
+        if (!pendingRoot.isConnected) {
+          scheduleCleanup();
+          continue;
+        }
+
+        applyDirections(pendingRoot, { fullReconcile: false, includeMessages: true });
+        refreshObservedMessages(pendingRoot);
       }
     });
   }
@@ -1635,12 +1952,17 @@
     }
 
     updateControlState();
-    scheduleApply(document);
+    messageDirectionQueue.clear();
+    applyInteractiveDirections(document);
+    refreshObservedMessages(document);
+    applyDirectionToVisibleMessages(document);
+    scheduleCleanup();
   }
 
   function loadMode() {
     if (!chrome.storage || !chrome.storage.local) {
-      scheduleApply(document);
+      applyInteractiveDirections(document);
+      applyDirectionToVisibleMessages(document);
       return;
     }
 
@@ -1733,18 +2055,51 @@
 
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
-        if (mutation.type === "characterData" || mutation.addedNodes.length > 0) {
-          scheduleApply(mutation.target instanceof Element ? mutation.target : mutation.target.parentElement);
+        if (mutation.type !== "characterData" && mutation.addedNodes.length === 0) {
+          continue;
         }
+
+        const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
+        if (!target) {
+          continue;
+        }
+
+        const addedElementCount = [...mutation.addedNodes].filter((node) => node instanceof Element).length;
+        const addedLargeSubtree = [...mutation.addedNodes].some((node) => (
+          node instanceof Element && node.querySelectorAll && node.querySelectorAll(`${MESSAGE_SELECTOR}, ${COMPOSER_SELECTOR}, table`).length > 4
+        ));
+        if (addedElementCount > 8 || addedLargeSubtree) {
+          applyInteractiveDirections(document);
+          refreshObservedMessages(target);
+          applyDirectionToVisibleMessages(document);
+          scheduleCleanup();
+          continue;
+        }
+
+        const scopedRoot = target.closest("th, td")?.closest("table") ||
+          target.closest(MESSAGE_SELECTOR) ||
+          target.closest(COMPOSER_CONTAINER_SELECTOR) ||
+          target.closest(COMPOSER_SELECTOR) ||
+          target.closest(RESPONSE_CHANGE_MENU_SELECTOR) ||
+          target;
+        scheduleApply(scopedRoot);
       }
     });
 
     observer.observe(target, { childList: true, characterData: true, subtree: true });
   }
 
+  function handleRouteChange() {
+    messageDirectionQueue.clear();
+    applyInteractiveDirections(document);
+    refreshObservedMessages(document);
+    applyDirectionToVisibleMessages(document);
+    scheduleCleanup();
+  }
+
   function watchRouteChanges() {
-    window.addEventListener("popstate", () => scheduleApply(document));
-    window.addEventListener("pageshow", () => scheduleApply(document));
+    window.addEventListener("popstate", handleRouteChange);
+    window.addEventListener("pageshow", handleRouteChange);
 
     for (const method of ["pushState", "replaceState"]) {
       const original = history[method];
@@ -1754,7 +2109,7 @@
 
       const wrapped = function (...args) {
         const result = original.apply(this, args);
-        scheduleApply(document);
+        handleRouteChange();
         return result;
       };
 
@@ -1763,8 +2118,26 @@
     }
   }
 
+  if (globalThis.__CGPT_DIRECTION_TEST_HOOKS__) {
+    Object.assign(globalThis.__CGPT_DIRECTION_TEST_HOOKS__, {
+      textSignatureFor,
+      cachedDirectionForTextElement,
+      cachedDirectionForTableCell,
+      cachedDirectionForTableLayout,
+      isMessageNearViewport,
+      enqueueMessageForDirection,
+      processDirectionQueue,
+      detectDirectionFromText
+    });
+    return;
+  }
+
   installDebugInspector();
-  applyDirections(document);
+  setupMessageIntersectionObserver();
+  applyInteractiveDirections(document);
+  refreshObservedMessages(document);
+  applyDirectionToVisibleMessages(document);
+  scheduleCleanup();
   loadMode();
   document.addEventListener("input", handleComposerInput, true);
   document.addEventListener("focusin", handleComposerFocus, true);
