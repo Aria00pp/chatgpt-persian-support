@@ -200,10 +200,16 @@
   const pendingRoots = new Set();
   const originalDirections = new WeakMap();
   const originalInlineStyles = new WeakMap();
+  const detectedDirectionCache = new WeakMap();
+  const elementTextSignatureCache = new WeakMap();
+  const tableLayoutDirectionCache = new WeakMap();
+  const tableCellDirectionCache = new WeakMap();
   let selectedMode = DEFAULT_MODE;
   let debugEnabled = false;
   let fullScanScheduled = false;
   let scheduled = false;
+  let cleanupScheduled = false;
+  let perfStats = null;
 
   function elementsMatching(root, selector, includeClosest = false) {
     const matches = new Set();
@@ -1056,33 +1062,20 @@
       return selectedMode;
     }
 
-    const headerText = tableHeaderText(tableElement);
-    return detectDirectionFromText(headerText || tableElement.textContent);
+    return cachedDirectionForTableLayout(tableElement);
   }
 
   function directionForTableCell(cellElement) {
-    return detectDirectionFromText(cellElement.textContent);
+    return cachedDirectionForTableCell(cellElement);
   }
 
   function applyStableDirectionToTable(tableElement, direction) {
-    if (!originalDirections.has(tableElement)) {
-      originalDirections.set(tableElement, tableElement.getAttribute("dir"));
-    }
-
-    clearDirectionClasses(tableElement);
-    tableElement.classList.add(APPLIED_CLASS, TABLE_CLASS, `cgpt-dir-${direction}`);
-    tableElement.setAttribute("dir", direction);
+    applyDirection(tableElement, TABLE_CLASS, direction);
   }
 
   function applyDirectionToTableCell(cellElement) {
     const direction = directionForTableCell(cellElement);
-    if (!originalDirections.has(cellElement)) {
-      originalDirections.set(cellElement, cellElement.getAttribute("dir"));
-    }
-
-    clearDirectionClasses(cellElement);
-    cellElement.classList.add(APPLIED_CLASS, TABLE_CELL_CLASS, `cgpt-dir-${direction}`);
-    cellElement.setAttribute("dir", direction);
+    applyDirection(cellElement, TABLE_CELL_CLASS, direction);
     applyInlineDirectionStyle(cellElement, direction);
   }
 
@@ -1094,6 +1087,9 @@
     const layoutDirection = directionForTableLayout(tableElement);
     applyStableDirectionToTable(tableElement, layoutDirection);
     for (const cellElement of tableElement.querySelectorAll("th, td")) {
+      if (perfStats) {
+        perfStats.cells += 1;
+      }
       applyDirectionToTableCell(cellElement);
     }
   }
@@ -1185,6 +1181,10 @@
   }
 
   function detectDirectionFromText(text, options = {}) {
+    if (perfStats) {
+      perfStats.detectCalls += 1;
+    }
+
     const stats = getStrongDirectionStats(text, options);
 
     if (stats.rtlCount === 0 && stats.latinCount === 0) {
@@ -1222,30 +1222,122 @@
     return element.textContent || "";
   }
 
+  function textSignatureFor(element, sampleLimit = 220, textOverride = null) {
+    const text = String(textOverride === null ? (element.textContent || "") : textOverride);
+    const tailLimit = Math.min(40, sampleLimit);
+    return [
+      text.length,
+      text.slice(0, sampleLimit),
+      text.length > sampleLimit ? text.slice(-tailLimit) : ""
+    ].join("::");
+  }
+
+  function cachedDirectionForTextElement(element, options = {}) {
+    const text = options.text === undefined
+      ? (options.kind === COMPOSER_CLASS ? composerText(element) : element.textContent || "")
+      : options.text;
+    const signature = textSignatureFor(element, options.sampleLimit || 220, text);
+
+    if (elementTextSignatureCache.get(element) === signature && detectedDirectionCache.has(element)) {
+      return detectedDirectionCache.get(element);
+    }
+
+    const direction = detectDirectionFromText(text, options);
+    elementTextSignatureCache.set(element, signature);
+    detectedDirectionCache.set(element, direction);
+    return direction;
+  }
+
+  function cachedDirectionForTableCell(cellElement) {
+    const signature = textSignatureFor(cellElement, 220);
+    const cached = tableCellDirectionCache.get(cellElement);
+    if (cached && cached.signature === signature) {
+      return cached.direction;
+    }
+
+    const direction = detectDirectionFromText(cellElement.textContent || "");
+    tableCellDirectionCache.set(cellElement, { signature, direction });
+    return direction;
+  }
+
+  function cachedDirectionForTableLayout(tableElement) {
+    const headerText = tableHeaderText(tableElement);
+    const text = headerText || tableElement.textContent || "";
+    const signature = textSignatureFor(tableElement, 220, text);
+    const cached = tableLayoutDirectionCache.get(tableElement);
+    if (cached && cached.signature === signature) {
+      return cached.direction;
+    }
+
+    const direction = detectDirectionFromText(text);
+    tableLayoutDirectionCache.set(tableElement, { signature, direction });
+    return direction;
+  }
+
   function directionFor(element, kind) {
     if (selectedMode !== "auto") {
       return selectedMode;
     }
 
-    return detectDirectionFromText(kind === COMPOSER_CLASS ? composerText(element) : element.textContent);
+    return cachedDirectionForTextElement(element, { kind });
   }
 
   function clearDirectionClasses(element) {
-    element.classList.remove(...DIRECTION_CLASSES, ...LEGACY_CLASSES);
+    const classesToRemove = [...DIRECTION_CLASSES, ...LEGACY_CLASSES].filter((className) => element.classList.contains(className));
+    if (classesToRemove.length > 0) {
+      element.classList.remove(...classesToRemove);
+    } else if (perfStats) {
+      perfStats.skippedWrites += 1;
+    }
   }
 
   function applyDirection(element, kind, forcedDirection = null) {
     const direction = forcedDirection || directionFor(element, kind);
-    if (!originalDirections.has(element)) {
-      originalDirections.set(element, element.getAttribute("dir"));
+    const desiredClasses = [APPLIED_CLASS, kind, `cgpt-dir-${selectedMode}`, `cgpt-dir-${direction}`];
+    const currentDir = element.getAttribute("dir");
+    const hasStaleDirectionClass = DIRECTION_CLASSES.some((className) => (
+      className !== `cgpt-dir-${selectedMode}` &&
+      className !== `cgpt-dir-${direction}` &&
+      element.classList.contains(className)
+    )) || LEGACY_CLASSES.some((className) => element.classList.contains(className));
+    const missingClass = desiredClasses.some((className) => !element.classList.contains(className));
+
+    if (currentDir === direction && !hasStaleDirectionClass && !missingClass) {
+      if (perfStats) {
+        perfStats.skippedWrites += 1;
+      }
+      return direction;
     }
-    clearDirectionClasses(element);
-    element.classList.add(APPLIED_CLASS, kind, `cgpt-dir-${selectedMode}`, `cgpt-dir-${direction}`);
-    element.setAttribute("dir", direction);
+
+    if (!originalDirections.has(element)) {
+      originalDirections.set(element, currentDir);
+    }
+
+    if (hasStaleDirectionClass) {
+      clearDirectionClasses(element);
+    }
+
+    for (const className of desiredClasses) {
+      if (!element.classList.contains(className)) {
+        element.classList.add(className);
+      }
+    }
+
+    if (currentDir !== direction) {
+      element.setAttribute("dir", direction);
+    }
     return direction;
   }
 
   function applyInlineDirectionStyle(element, direction) {
+    const textAlign = direction === "rtl" ? "right" : "left";
+    if (element.style.direction === direction && element.style.textAlign === textAlign && element.style.unicodeBidi === "isolate") {
+      if (perfStats) {
+        perfStats.skippedWrites += 1;
+      }
+      return;
+    }
+
     if (!originalInlineStyles.has(element)) {
       originalInlineStyles.set(element, {
         direction: element.style.direction,
@@ -1254,9 +1346,15 @@
       });
     }
 
-    element.style.direction = direction;
-    element.style.textAlign = direction === "rtl" ? "right" : "left";
-    element.style.unicodeBidi = "isolate";
+    if (element.style.direction !== direction) {
+      element.style.direction = direction;
+    }
+    if (element.style.textAlign !== textAlign) {
+      element.style.textAlign = textAlign;
+    }
+    if (element.style.unicodeBidi !== "isolate") {
+      element.style.unicodeBidi = "isolate";
+    }
   }
 
   function restoreInlineDirectionStyle(element) {
@@ -1463,11 +1561,18 @@
         continue;
       }
 
+      if (perfStats) {
+        perfStats.messages += 1;
+      }
+
       for (const target of getMessageTextTargets(messageElement)) {
         applyDirection(target, MESSAGE_CLASS);
       }
 
       for (const tableElement of getTableDirectionTargets(messageElement)) {
+        if (perfStats) {
+          perfStats.tables += 1;
+        }
         applyDirectionToTableCells(tableElement);
       }
     }
@@ -1573,26 +1678,68 @@
     }
   }
 
-  function applyDirections(root = document) {
+  function createPerfStats() {
+    return {
+      messages: 0,
+      tables: 0,
+      cells: 0,
+      detectCalls: 0,
+      skippedWrites: 0
+    };
+  }
+
+  function applyDirections(root = document, options = {}) {
+    const previousPerfStats = perfStats;
+    const startedAt = debugEnabled && typeof performance !== "undefined" ? performance.now() : 0;
+    perfStats = debugEnabled ? createPerfStats() : null;
+
     try {
-      reconcileAppliedElements();
+      if (options.fullReconcile) {
+        reconcileAppliedElements();
+      }
       applyDirectionToComposer(root);
       applyDirectionToActiveEditables(root);
       applyDirectionToFocusedResponseChangeMenus(root);
       applyDirectionToMessages(root);
-      ensureDirectionControl();
+      if (root === document || options.fullReconcile) {
+        ensureDirectionControl();
+      }
+      if (debugEnabled && perfStats) {
+        console.debug("[cgpt-dir] apply pass", {
+          root: root === document ? "document" : root && root.nodeName,
+          fullReconcile: Boolean(options.fullReconcile),
+          elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
+          ...perfStats
+        });
+      }
     } catch (_error) {
       // ChatGPT can replace DOM subtrees while they are being inspected. A future
       // mutation or route event will retry without interrupting the page.
+    } finally {
+      perfStats = previousPerfStats;
     }
   }
 
-  function scheduleApply(root = document) {
-    if (root === document || root === document.documentElement) {
+  function scheduleCleanup() {
+    if (cleanupScheduled) {
+      return;
+    }
+
+    cleanupScheduled = true;
+    setTimeout(() => {
+      cleanupScheduled = false;
+      applyDirections(document, { fullReconcile: true });
+    }, 3000);
+  }
+
+  function scheduleApply(root = document, options = {}) {
+    const fullScan = Boolean(options.fullScan) || root === document || root === document.documentElement;
+    if (fullScan) {
       fullScanScheduled = true;
       pendingRoots.clear();
     } else if (!fullScanScheduled && root instanceof Element) {
       pendingRoots.add(root);
+      scheduleCleanup();
     }
 
     if (scheduled) {
@@ -1606,14 +1753,18 @@
       if (fullScanScheduled) {
         fullScanScheduled = false;
         pendingRoots.clear();
-        applyDirections(document);
+        applyDirections(document, { fullReconcile: true });
         return;
       }
 
       const roots = [...pendingRoots];
       pendingRoots.clear();
       for (const pendingRoot of roots) {
-        applyDirections(pendingRoot.isConnected ? pendingRoot : document);
+        if (pendingRoot.isConnected) {
+          applyDirections(pendingRoot, { fullReconcile: false });
+        } else {
+          scheduleCleanup();
+        }
       }
     });
   }
@@ -1733,9 +1884,31 @@
 
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
-        if (mutation.type === "characterData" || mutation.addedNodes.length > 0) {
-          scheduleApply(mutation.target instanceof Element ? mutation.target : mutation.target.parentElement);
+        if (mutation.type !== "characterData" && mutation.addedNodes.length === 0) {
+          continue;
         }
+
+        const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
+        if (!target) {
+          continue;
+        }
+
+        const addedElementCount = [...mutation.addedNodes].filter((node) => node instanceof Element).length;
+        const addedLargeSubtree = [...mutation.addedNodes].some((node) => (
+          node instanceof Element && node.querySelectorAll && node.querySelectorAll(`${MESSAGE_SELECTOR}, ${COMPOSER_SELECTOR}, table`).length > 4
+        ));
+        if (addedElementCount > 8 || addedLargeSubtree) {
+          scheduleApply(document, { fullScan: true });
+          continue;
+        }
+
+        const scopedRoot = target.closest("th, td")?.closest("table") ||
+          target.closest(MESSAGE_SELECTOR) ||
+          target.closest(COMPOSER_CONTAINER_SELECTOR) ||
+          target.closest(COMPOSER_SELECTOR) ||
+          target.closest(RESPONSE_CHANGE_MENU_SELECTOR) ||
+          target;
+        scheduleApply(scopedRoot);
       }
     });
 
@@ -1763,8 +1936,19 @@
     }
   }
 
+  if (globalThis.__CGPT_DIRECTION_TEST_HOOKS__) {
+    Object.assign(globalThis.__CGPT_DIRECTION_TEST_HOOKS__, {
+      textSignatureFor,
+      cachedDirectionForTextElement,
+      cachedDirectionForTableCell,
+      cachedDirectionForTableLayout,
+      detectDirectionFromText
+    });
+    return;
+  }
+
   installDebugInspector();
-  applyDirections(document);
+  applyDirections(document, { fullReconcile: true });
   loadMode();
   document.addEventListener("input", handleComposerInput, true);
   document.addEventListener("focusin", handleComposerFocus, true);

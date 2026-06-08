@@ -111,6 +111,18 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] ChatGPT controls remain visually normal after switching modes.
 - [ ] Repeat the relevant checks on `https://chat.openai.com/` if that host is available for the account.
 
+
+## Performance checklist
+
+Use this checklist after changing direction logic, especially in Auto mode:
+
+- [ ] Long chats with many existing user and assistant messages remain responsive in Auto mode.
+- [ ] A streaming response in Auto mode updates direction without freezing the page.
+- [ ] Typing in the main composer in Auto mode remains responsive.
+- [ ] Table-heavy messages do not cause major lag while preserving table layout direction and per-cell direction.
+- [ ] Switching between Auto / RTL / LTR still updates existing messages, composer/edit targets, and visible tables.
+- [ ] Edit mode and the response-change popup still apply the selected direction and update live in Auto mode.
+
 ## Debugging response-change popup detection
 
 Diagnostics are disabled by default and only print local console output when explicitly enabled. The content script listens for DOM events so commands from the normal page DevTools Console can trigger diagnostics despite Chrome's isolated content-script world.
