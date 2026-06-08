@@ -66,8 +66,9 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] Retry/regenerate input flow receives the selected direction behavior.
 - [ ] Open the retry/try-again popup.
 - [ ] Click "Ask to change response".
-- [ ] In RTL mode, type Persian into the top input after the placeholder disappears; caret and typing direction are truly RTL.
-- [ ] In LTR mode, English text starts from the left in the Ask to change response box.
+- [ ] In RTL mode, the response-change popup behaves the same as manually pressing Ctrl + ShiftRight.
+- [ ] In RTL mode, type Persian into the top input after the placeholder disappears; the caret starts on the right and Persian text extends naturally RTL.
+- [ ] In LTR mode, the response-change popup behaves the same as manually pressing Ctrl + ShiftLeft, and English text starts from the left.
 - [ ] In Auto mode, direction updates live in the Ask to change response box.
 - [ ] Type this in the Ask to change response box: `این پاسخ را با Auto mode و shortcut و input handler بهتر توضیح بده`.
 - [ ] "Try again" and "Search the web" menu items remain normal while only the response-change input changes direction.

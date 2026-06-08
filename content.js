@@ -154,7 +154,16 @@
     "[contenteditable='true']",
     "[role='textbox']",
     "textarea",
+    "input",
     "p",
+    "[data-placeholder]"
+  ].join(",");
+
+  const EDITABLE_BLOCK_SELECTOR = [
+    "p",
+    "div",
+    "li",
+    "blockquote",
     "[data-placeholder]"
   ].join(",");
 
@@ -685,6 +694,110 @@
     originalInlineStyles.delete(element);
   }
 
+
+  function isEditableDirectionExcluded(element, allowMenuAncestor = false) {
+    const excludedSelector = allowMenuAncestor
+      ? [
+          "button",
+          "[role='button']",
+          "[role='toolbar']",
+          "[role='listbox']",
+          "[data-testid*='copy' i]",
+          "[data-testid*='feedback' i]",
+          EDIT_COMPOSER_EXCLUDED_SELECTOR,
+          `.${CONTROL_CLASS}`
+        ].join(",")
+      : `${CONTROL_AREA_SELECTOR}, ${EDIT_COMPOSER_EXCLUDED_SELECTOR}, .${CONTROL_CLASS}`;
+
+    return Boolean(element.closest(excludedSelector));
+  }
+  function getEditingHost(element) {
+    if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+      return element;
+    }
+
+    if (element.matches(".ProseMirror, [contenteditable='true'], [role='textbox']")) {
+      return element;
+    }
+
+    return element.closest(".ProseMirror, [contenteditable='true'], [role='textbox']");
+  }
+
+  function getActiveEditableBlock(element) {
+    const host = getEditingHost(element);
+    if (!host || host instanceof HTMLTextAreaElement || host instanceof HTMLInputElement) {
+      return host;
+    }
+
+    const selection = window.getSelection ? window.getSelection() : null;
+    const anchorNode = selection && selection.rangeCount > 0 ? selection.anchorNode : null;
+    const anchorElement = anchorNode instanceof Element ? anchorNode : anchorNode && anchorNode.parentElement;
+    const selectionBlock = anchorElement && host.contains(anchorElement)
+      ? anchorElement.closest(EDITABLE_BLOCK_SELECTOR)
+      : null;
+
+    if (selectionBlock && host.contains(selectionBlock)) {
+      return selectionBlock;
+    }
+
+    const focused = document.activeElement instanceof Element && host.contains(document.activeElement)
+      ? document.activeElement.closest(EDITABLE_BLOCK_SELECTOR)
+      : null;
+
+    if (focused && host.contains(focused)) {
+      return focused;
+    }
+
+    return host.querySelector(EDITABLE_BLOCK_SELECTOR) || host;
+  }
+
+  function applyParagraphDirection(element, direction) {
+    if (!element) {
+      return;
+    }
+
+    const host = getEditingHost(element) || element;
+    if (isEditableDirectionExcluded(element, isResponseChangeComposer(host))) {
+      return;
+    }
+
+    applyDirection(element, COMPOSER_CLASS, direction);
+    applyInlineDirectionStyle(element, direction);
+  }
+
+  function getKeyboardShortcutDirectionTargets(element) {
+    const targets = new Set();
+    const host = getEditingHost(element) || element;
+
+    if (host instanceof HTMLTextAreaElement || host instanceof HTMLInputElement) {
+      targets.add(host);
+      return targets;
+    }
+
+    targets.add(host);
+
+    const activeBlock = getActiveEditableBlock(host);
+    if (activeBlock) {
+      targets.add(activeBlock);
+    }
+
+    if (typeof host.querySelectorAll === "function") {
+      for (const block of host.querySelectorAll(EDITABLE_BLOCK_SELECTOR)) {
+        if (!isEditableDirectionExcluded(block, isResponseChangeComposer(host))) {
+          targets.add(block);
+        }
+      }
+    }
+
+    return targets;
+  }
+
+  function applyDirectionLikeKeyboardShortcut(element, direction) {
+    for (const target of getKeyboardShortcutDirectionTargets(element)) {
+      applyParagraphDirection(target, direction);
+    }
+  }
+
   function getEditableDirectionTargets(element) {
     const targets = new Set();
     if (element.matches(EDITABLE_DIRECTION_TARGET_SELECTOR)) {
@@ -693,10 +806,14 @@
 
     if (typeof element.querySelectorAll === "function") {
       for (const target of element.querySelectorAll(EDITABLE_DIRECTION_TARGET_SELECTOR)) {
-        if (!target.closest(`${CONTROL_AREA_SELECTOR}, ${EDIT_COMPOSER_EXCLUDED_SELECTOR}, .${CONTROL_CLASS}`)) {
+        if (!isEditableDirectionExcluded(target, isResponseChangeComposer(getEditingHost(element) || element))) {
           targets.add(target);
         }
       }
+    }
+
+    for (const target of getKeyboardShortcutDirectionTargets(element)) {
+      targets.add(target);
     }
 
     return targets;
@@ -704,9 +821,9 @@
 
   function applyDirectionToEditableTree(element, direction) {
     for (const target of getEditableDirectionTargets(element)) {
-      applyDirection(target, COMPOSER_CLASS, direction);
-      applyInlineDirectionStyle(target, direction);
+      applyParagraphDirection(target, direction);
     }
+    applyDirectionLikeKeyboardShortcut(element, direction);
   }
 
   function applyDirectionToActiveEditables(root = document) {
@@ -918,7 +1035,7 @@
 
   function handleComposerInput(event) {
     const composer = event.target instanceof Element ? event.target.closest(COMPOSER_SELECTOR) : null;
-    if (composer && isComposerElement(composer) && selectedMode === "auto") {
+    if (composer && isComposerElement(composer)) {
       const direction = applyDirection(composer, COMPOSER_CLASS);
       applyDirectionToEditableTree(composer, direction);
     }
