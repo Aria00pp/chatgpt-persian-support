@@ -45,6 +45,16 @@
   unicode-bidi: isolate;
 }
 
+.cgpt-dir-inline-ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.cgpt-dir-inline-rtl {
+  direction: rtl;
+  unicode-bidi: isolate;
+}
+
 /* Technical content remains readable and keeps its expected LTR layout in every mode. */
 .cgpt-dir-message:is(pre, code, kbd, samp, textarea, table, math, .katex, .MathJax),
 .cgpt-dir-message :is(pre, code, kbd, samp, textarea, table, math, .katex, .MathJax),

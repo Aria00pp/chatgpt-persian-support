@@ -21,12 +21,27 @@ for (const mode of ["auto", "rtl", "ltr"]) {
   assert(contentJs.includes(`"${mode}"`), `mode string missing: ${mode}`);
 }
 
-for (const helper of ["isPromptLikeEditable", "isMainComposer", "isInlineEditComposer", "isRetryComposer"]) {
-  assert(contentJs.includes(`function ${helper}`), `composer detection helper missing: ${helper}`);
+for (const helper of [
+  "isPromptLikeEditable",
+  "isMainComposer",
+  "isInlineEditComposer",
+  "isRetryComposer",
+  "shouldSkipInlineBidiContainer",
+  "isolateInlineBidiRuns",
+  "wrapLatinRunsInTextNode",
+  "wrapRtlRunsInTextNode"
+]) {
+  assert(contentJs.includes(`function ${helper}`), `helper missing: ${helper}`);
 }
 
 assert(contentJs.includes("chrome.storage.local"), "mode storage must continue using chrome.storage.local");
 assert(contentJs.includes("createDirectionControl"), "direction control must still exist");
+assert(contentJs.includes('document.createElement("bdi")'), "inline bidi wrapper must use bdi");
+assert(contentCss.includes("cgpt-dir-inline-ltr"), "cgpt-dir-inline-ltr CSS class must exist");
+assert(contentCss.includes("cgpt-dir-inline-rtl"), "cgpt-dir-inline-rtl CSS class must exist");
+assert(contentJs.includes("!root.classList.contains(MESSAGE_CLASS)"), "inline wrapper must only process message targets");
+assert(contentJs.includes("root.classList.contains(COMPOSER_CLASS)"), "inline wrapper must guard against composer text");
+assert(contentJs.includes("COMPOSER_SELECTOR"), "inline skip selectors must include composer selector");
 
 for (const selector of ["strong", "b", "em", "i", "span", "q", "a"]) {
   assert(contentCss.includes(selector), `inline formatting selector missing: ${selector}`);

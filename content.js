@@ -9,6 +9,8 @@
   const MESSAGE_CLASS = "cgpt-dir-message";
   const CONTROL_CLASS = "cgpt-dir-control";
   const ACTIVE_CONTROL_CLASS = "cgpt-dir-control-active";
+  const INLINE_LTR_CLASS = "cgpt-dir-inline-ltr";
+  const INLINE_RTL_CLASS = "cgpt-dir-inline-rtl";
   const LEGACY_CLASSES = ["cgpt-rtl-applied", "cgpt-rtl-composer", "cgpt-rtl-message"];
   const DIRECTION_CLASSES = ["cgpt-dir-auto", "cgpt-dir-rtl", "cgpt-dir-ltr"];
 
@@ -129,6 +131,23 @@
     "[role='grid']",
     "[role='treegrid']"
   ].join(",");
+
+  const INLINE_BIDI_SKIP_SELECTOR = [
+    TECHNICAL_SELECTOR,
+    CONTROL_AREA_SELECTOR,
+    COMPOSER_SELECTOR,
+    `.${CONTROL_CLASS}`,
+    `.${INLINE_LTR_CLASS}`,
+    `.${INLINE_RTL_CLASS}`,
+    "a",
+    "input",
+    "select",
+    "[contenteditable='true']",
+    "[role='textbox']"
+  ].join(",");
+
+  const LATIN_RUN_PATTERN = /[A-Za-z][A-Za-z0-9_#]*(?:[.+/-][A-Za-z0-9_#]+)*(?:(?:\s+|\s*[+&/]\s*)[A-Za-z][A-Za-z0-9_#]*(?:[.+/-][A-Za-z0-9_#]+)*)*/g;
+  const RTL_RUN_PATTERN = /[\u0590-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+(?:\s+[\u0590-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+)*/gu;
 
   const pendingRoots = new Set();
   const originalDirections = new WeakMap();
@@ -380,6 +399,112 @@
     return detectDirectionFromText(kind === COMPOSER_CLASS ? composerText(element) : element.textContent);
   }
 
+
+  function shouldSkipInlineBidiContainer(element) {
+    return Boolean(
+      !element ||
+      element.closest(INLINE_BIDI_SKIP_SELECTOR) ||
+      element.isContentEditable
+    );
+  }
+
+  function createInlineBidiElement(text, direction) {
+    const wrapper = document.createElement("bdi");
+    wrapper.dir = direction;
+    wrapper.className = direction === "ltr" ? INLINE_LTR_CLASS : INLINE_RTL_CLASS;
+    wrapper.textContent = text;
+    return wrapper;
+  }
+
+  function wrapRunsInTextNode(textNode, pattern, direction) {
+    const text = textNode.nodeValue || "";
+    pattern.lastIndex = 0;
+
+    if (!pattern.test(text)) {
+      return false;
+    }
+
+    pattern.lastIndex = 0;
+    const fragment = document.createDocumentFragment();
+    let lastIndex = 0;
+    let wrapped = false;
+
+    for (const match of text.matchAll(pattern)) {
+      const run = match[0];
+      const index = match.index || 0;
+
+      if (index > lastIndex) {
+        fragment.append(document.createTextNode(text.slice(lastIndex, index)));
+      }
+
+      fragment.append(createInlineBidiElement(run, direction));
+      wrapped = true;
+      lastIndex = index + run.length;
+    }
+
+    if (!wrapped) {
+      return false;
+    }
+
+    if (lastIndex < text.length) {
+      fragment.append(document.createTextNode(text.slice(lastIndex)));
+    }
+
+    textNode.replaceWith(fragment);
+    return true;
+  }
+
+  function wrapLatinRunsInTextNode(textNode) {
+    return wrapRunsInTextNode(textNode, LATIN_RUN_PATTERN, "ltr");
+  }
+
+  function wrapRtlRunsInTextNode(textNode) {
+    return wrapRunsInTextNode(textNode, RTL_RUN_PATTERN, "rtl");
+  }
+
+  function isolateInlineBidiRuns(root, blockDirection) {
+    if (
+      !(root instanceof Element) ||
+      !root.classList.contains(MESSAGE_CLASS) ||
+      root.classList.contains(COMPOSER_CLASS) ||
+      shouldSkipInlineBidiContainer(root)
+    ) {
+      return;
+    }
+
+    const textNodes = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(textNode) {
+        if (!textNode.nodeValue || !textNode.nodeValue.trim()) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
+        const parent = textNode.parentElement;
+        if (shouldSkipInlineBidiContainer(parent)) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+
+    while (walker.nextNode()) {
+      textNodes.push(walker.currentNode);
+    }
+
+    for (const textNode of textNodes) {
+      if (!textNode.parentNode) {
+        continue;
+      }
+
+      if (blockDirection === "rtl") {
+        wrapLatinRunsInTextNode(textNode);
+      } else if (blockDirection === "ltr") {
+        wrapRtlRunsInTextNode(textNode);
+      }
+    }
+  }
+
   function clearDirectionClasses(element) {
     element.classList.remove(...DIRECTION_CLASSES, ...LEGACY_CLASSES);
   }
@@ -392,6 +517,7 @@
     clearDirectionClasses(element);
     element.classList.add(APPLIED_CLASS, kind, `cgpt-dir-${selectedMode}`, `cgpt-dir-${direction}`);
     element.setAttribute("dir", direction);
+    return direction;
   }
 
   function removeDirection(element) {
@@ -427,7 +553,8 @@
       }
 
       for (const target of getMessageTextTargets(messageElement)) {
-        applyDirection(target, MESSAGE_CLASS);
+        const direction = applyDirection(target, MESSAGE_CLASS);
+        isolateInlineBidiRuns(target, direction);
       }
     }
   }
