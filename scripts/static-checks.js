@@ -65,7 +65,15 @@ for (const helper of [
   "cachedDirectionForTextElement",
   "cachedDirectionForTableCell",
   "cachedDirectionForTableLayout",
-  "scheduleCleanup"
+  "scheduleCleanup",
+  "setupMessageIntersectionObserver",
+  "refreshObservedMessages",
+  "observeMessageForLazyDirection",
+  "isMessageNearViewport",
+  "enqueueMessageForDirection",
+  "processDirectionQueue",
+  "applyDirectionToVisibleMessages",
+  "applyInteractiveDirections"
 ]) {
   assert(contentJs.includes(`function ${helper}`), `helper missing: ${helper}`);
 }
@@ -111,6 +119,18 @@ assert(contentJs.includes("applyDirectionToFocusedResponseChangeMenus(root)"), "
 assert(contentJs.includes("console.info"), "diagnostics should log locally to the console only");
 assert(contentJs.includes("previewText(container && container.textContent, 500)"), "diagnostic container text must be limited");
 assert(contentJs.includes('for (const tableElement of getTableDirectionTargets(messageElement))'), "message apply pass must process tables separately from prose targets");
+
+assert(contentJs.includes("IntersectionObserver"), "rendered messages must use IntersectionObserver for lazy direction processing");
+assert(contentJs.includes("const messageDirectionQueue = new Set()"), "message direction queue must exist");
+assert(contentJs.includes("const MAX_MESSAGES_PER_FRAME"), "message queue must use a per-frame processing budget");
+assert(contentJs.includes("MESSAGE_OBSERVER_ROOT_MARGIN"), "message observer must use a generous root margin");
+assert(!contentJs.includes("applyDirections(document, { fullReconcile: true })"), "startup/cleanup must not full-process all document messages");
+assert(!contentJs.includes("scheduleApply(document, { fullScan: true })"), "large subtree mutations must not force synchronous full document message processing");
+assert(new RegExp("installDebugInspector\\(\\);\\s*setupMessageIntersectionObserver\\(\\);\\s*applyInteractiveDirections\\(document\\);").test(contentJs), "startup must initialize lazy message observation and process interactive targets first");
+assert(/function applyInteractiveDirections\(root = document\) \{[\s\S]*?applyDirectionToComposer\(root\)[\s\S]*?applyDirectionToActiveEditables\(root\)[\s\S]*?applyDirectionToFocusedResponseChangeMenus\(root\)[\s\S]*?ensureDirectionControl\(\)/.test(contentJs), "composer, edit, popup, and controls must remain immediate");
+assert(/function setMode\(mode, persist = true\) \{[\s\S]*?applyInteractiveDirections\(document\)[\s\S]*?applyDirectionToVisibleMessages\(document\)/.test(contentJs), "mode switches must update interactive and visible messages without processing all offscreen messages");
+assert(/if \(addedElementCount > 8 \|\| addedLargeSubtree\) \{[\s\S]*?applyInteractiveDirections\(document\)[\s\S]*?applyDirectionToVisibleMessages\(document\)[\s\S]*?continue;/.test(contentJs), "large subtree additions must process interactive and visible messages lazily");
+assert(/function scheduleCleanup\(\) \{[\s\S]*?scheduleIdleWork[\s\S]*?applyInteractiveDirections\(document\)[\s\S]*?applyDirectionToVisibleMessages\(document\)/.test(contentJs), "cleanup must be idle/debounced and avoid full message formatting");
 assert(contentJs.includes("const detectedDirectionCache = new WeakMap()"), "detected direction WeakMap cache must exist");
 assert(contentJs.includes("const elementTextSignatureCache = new WeakMap()"), "text signature WeakMap cache must exist");
 assert(contentJs.includes("const tableLayoutDirectionCache = new WeakMap()"), "table layout WeakMap cache must exist");

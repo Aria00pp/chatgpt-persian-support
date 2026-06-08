@@ -116,11 +116,13 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 
 Use this checklist after changing direction logic, especially in Auto mode:
 
-- [ ] Long chats with many existing user and assistant messages remain responsive in Auto mode.
+- [ ] Opening a long chat with many existing messages and code blocks remains responsive in Auto mode.
+- [ ] Visible and near-visible messages format quickly after the chat loads.
+- [ ] Offscreen messages may remain raw briefly, then format lazily as they approach the viewport while scrolling.
 - [ ] A streaming response in Auto mode updates direction without freezing the page.
 - [ ] Typing in the main composer in Auto mode remains responsive.
-- [ ] Table-heavy messages do not cause major lag while preserving table layout direction and per-cell direction.
-- [ ] Switching between Auto / RTL / LTR still updates existing messages, composer/edit targets, and visible tables.
+- [ ] Table-heavy visible messages preserve table layout direction and per-cell direction without major lag.
+- [ ] Switching between Auto / RTL / LTR updates composer/edit/popup immediately and does not freeze long chats.
 - [ ] Edit mode and the response-change popup still apply the selected direction and update live in Auto mode.
 
 ## Debugging response-change popup detection

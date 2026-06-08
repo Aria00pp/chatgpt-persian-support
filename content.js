@@ -197,6 +197,10 @@
     "[data-radix-popper-content-wrapper]"
   ].join(",");
 
+  const MESSAGE_OBSERVER_ROOT_MARGIN = "1200px 0px";
+  const MESSAGE_OBSERVER_MARGIN_PX = 1200;
+  const MAX_MESSAGES_PER_FRAME = 6;
+
   const pendingRoots = new Set();
   const originalDirections = new WeakMap();
   const originalInlineStyles = new WeakMap();
@@ -209,7 +213,11 @@
   let fullScanScheduled = false;
   let scheduled = false;
   let cleanupScheduled = false;
+  let messageObserver = null;
+  let directionQueueScheduled = false;
   let perfStats = null;
+  const messageDirectionQueue = new Set();
+  const observedMessages = new WeakSet();
 
   function elementsMatching(root, selector, includeClosest = false) {
     const matches = new Set();
@@ -1680,6 +1688,10 @@
 
   function createPerfStats() {
     return {
+      observedMessages: 0,
+      queuedMessages: 0,
+      processedMessages: 0,
+      skippedOffscreenMessages: 0,
       messages: 0,
       tables: 0,
       cells: 0,
@@ -1688,35 +1700,183 @@
     };
   }
 
-  function applyDirections(root = document, options = {}) {
+  function withPerfStats(label, callback, details = {}) {
     const previousPerfStats = perfStats;
     const startedAt = debugEnabled && typeof performance !== "undefined" ? performance.now() : 0;
     perfStats = debugEnabled ? createPerfStats() : null;
 
     try {
+      return callback();
+    } catch (_error) {
+      // ChatGPT can replace DOM subtrees while they are being inspected. A future
+      // mutation or route event will retry without interrupting the page.
+      return undefined;
+    } finally {
+      if (debugEnabled && perfStats) {
+        console.debug("[cgpt-dir] " + label, {
+          elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
+          ...perfStats,
+          ...details
+        });
+      }
+      perfStats = previousPerfStats;
+    }
+  }
+
+  function applyInteractiveDirections(root = document) {
+    return withPerfStats("interactive pass", () => {
+      applyDirectionToComposer(root);
+      applyDirectionToActiveEditables(root);
+      applyDirectionToFocusedResponseChangeMenus(root);
+      if (root === document) {
+        ensureDirectionControl();
+      }
+    }, { root: root === document ? "document" : root && root.nodeName });
+  }
+
+  function isMessageNearViewport(messageElement) {
+    if (!(messageElement instanceof Element) || !messageElement.isConnected) {
+      return false;
+    }
+
+    const rect = messageElement.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    return rect.bottom >= -MESSAGE_OBSERVER_MARGIN_PX && rect.top <= viewportHeight + MESSAGE_OBSERVER_MARGIN_PX;
+  }
+
+  function setupMessageIntersectionObserver() {
+    if (messageObserver || typeof IntersectionObserver !== "function") {
+      return;
+    }
+
+    messageObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          enqueueMessageForDirection(entry.target);
+        }
+      }
+    }, { root: null, rootMargin: MESSAGE_OBSERVER_ROOT_MARGIN, threshold: 0 });
+  }
+
+  function observeMessageForLazyDirection(messageElement) {
+    if (!(messageElement instanceof Element) || !isMessageElement(messageElement) || observedMessages.has(messageElement)) {
+      return;
+    }
+
+    observedMessages.add(messageElement);
+    if (perfStats) {
+      perfStats.observedMessages += 1;
+    }
+
+    if (messageObserver) {
+      messageObserver.observe(messageElement);
+    }
+
+    if (!messageObserver || isMessageNearViewport(messageElement)) {
+      enqueueMessageForDirection(messageElement);
+    }
+  }
+
+  function refreshObservedMessages(root = document) {
+    setupMessageIntersectionObserver();
+    for (const messageElement of elementsMatching(root, MESSAGE_SELECTOR, true)) {
+      observeMessageForLazyDirection(messageElement);
+    }
+  }
+
+  function enqueueMessageForDirection(messageElement) {
+    if (!(messageElement instanceof Element) || !messageElement.isConnected || !isMessageElement(messageElement)) {
+      return;
+    }
+
+    if (!messageDirectionQueue.has(messageElement)) {
+      messageDirectionQueue.add(messageElement);
+      if (perfStats) {
+        perfStats.queuedMessages += 1;
+      }
+    }
+
+    if (directionQueueScheduled) {
+      return;
+    }
+
+    directionQueueScheduled = true;
+    requestAnimationFrame(processDirectionQueue);
+  }
+
+  function processDirectionQueue() {
+    directionQueueScheduled = false;
+    withPerfStats("message queue", () => {
+      let processed = 0;
+      for (const messageElement of [...messageDirectionQueue]) {
+        messageDirectionQueue.delete(messageElement);
+        if (!messageElement.isConnected) {
+          continue;
+        }
+
+        if (!isMessageNearViewport(messageElement)) {
+          if (perfStats) {
+            perfStats.skippedOffscreenMessages += 1;
+          }
+          continue;
+        }
+
+        applyDirectionToMessages(messageElement);
+        processed += 1;
+        if (perfStats) {
+          perfStats.processedMessages += 1;
+        }
+
+        if (processed >= MAX_MESSAGES_PER_FRAME) {
+          break;
+        }
+      }
+
+      if (messageDirectionQueue.size > 0) {
+        directionQueueScheduled = true;
+        requestAnimationFrame(processDirectionQueue);
+      }
+    }, { queuedMessages: messageDirectionQueue.size });
+  }
+
+  function applyDirectionToVisibleMessages(root = document) {
+    return withPerfStats("visible message refresh", () => {
+      refreshObservedMessages(root);
+      for (const messageElement of elementsMatching(root, MESSAGE_SELECTOR, true)) {
+        if (isMessageNearViewport(messageElement)) {
+          enqueueMessageForDirection(messageElement);
+        } else if (perfStats) {
+          perfStats.skippedOffscreenMessages += 1;
+        }
+      }
+    }, { root: root === document ? "document" : root && root.nodeName });
+  }
+
+  function applyDirections(root = document, options = {}) {
+    return withPerfStats("apply pass", () => {
       if (options.fullReconcile) {
         reconcileAppliedElements();
       }
       applyDirectionToComposer(root);
       applyDirectionToActiveEditables(root);
       applyDirectionToFocusedResponseChangeMenus(root);
-      applyDirectionToMessages(root);
+      if (options.includeMessages || root !== document) {
+        applyDirectionToMessages(root);
+      }
       if (root === document || options.fullReconcile) {
         ensureDirectionControl();
       }
-      if (debugEnabled && perfStats) {
-        console.debug("[cgpt-dir] apply pass", {
-          root: root === document ? "document" : root && root.nodeName,
-          fullReconcile: Boolean(options.fullReconcile),
-          elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
-          ...perfStats
-        });
-      }
-    } catch (_error) {
-      // ChatGPT can replace DOM subtrees while they are being inspected. A future
-      // mutation or route event will retry without interrupting the page.
-    } finally {
-      perfStats = previousPerfStats;
+    }, {
+      root: root === document ? "document" : root && root.nodeName,
+      fullReconcile: Boolean(options.fullReconcile)
+    });
+  }
+
+  function scheduleIdleWork(callback, timeout = 3000) {
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(callback, { timeout });
+    } else {
+      setTimeout(callback, timeout);
     }
   }
 
@@ -1726,9 +1886,11 @@
     }
 
     cleanupScheduled = true;
-    setTimeout(() => {
+    scheduleIdleWork(() => {
       cleanupScheduled = false;
-      applyDirections(document, { fullReconcile: true });
+      applyInteractiveDirections(document);
+      refreshObservedMessages(document);
+      applyDirectionToVisibleMessages(document);
     }, 3000);
   }
 
@@ -1753,18 +1915,22 @@
       if (fullScanScheduled) {
         fullScanScheduled = false;
         pendingRoots.clear();
-        applyDirections(document, { fullReconcile: true });
+        applyInteractiveDirections(document);
+        applyDirectionToVisibleMessages(document);
+        scheduleCleanup();
         return;
       }
 
       const roots = [...pendingRoots];
       pendingRoots.clear();
       for (const pendingRoot of roots) {
-        if (pendingRoot.isConnected) {
-          applyDirections(pendingRoot, { fullReconcile: false });
-        } else {
+        if (!pendingRoot.isConnected) {
           scheduleCleanup();
+          continue;
         }
+
+        applyDirections(pendingRoot, { fullReconcile: false, includeMessages: true });
+        refreshObservedMessages(pendingRoot);
       }
     });
   }
@@ -1786,12 +1952,17 @@
     }
 
     updateControlState();
-    scheduleApply(document);
+    messageDirectionQueue.clear();
+    applyInteractiveDirections(document);
+    refreshObservedMessages(document);
+    applyDirectionToVisibleMessages(document);
+    scheduleCleanup();
   }
 
   function loadMode() {
     if (!chrome.storage || !chrome.storage.local) {
-      scheduleApply(document);
+      applyInteractiveDirections(document);
+      applyDirectionToVisibleMessages(document);
       return;
     }
 
@@ -1898,7 +2069,10 @@
           node instanceof Element && node.querySelectorAll && node.querySelectorAll(`${MESSAGE_SELECTOR}, ${COMPOSER_SELECTOR}, table`).length > 4
         ));
         if (addedElementCount > 8 || addedLargeSubtree) {
-          scheduleApply(document, { fullScan: true });
+          applyInteractiveDirections(document);
+          refreshObservedMessages(target);
+          applyDirectionToVisibleMessages(document);
+          scheduleCleanup();
           continue;
         }
 
@@ -1915,9 +2089,17 @@
     observer.observe(target, { childList: true, characterData: true, subtree: true });
   }
 
+  function handleRouteChange() {
+    messageDirectionQueue.clear();
+    applyInteractiveDirections(document);
+    refreshObservedMessages(document);
+    applyDirectionToVisibleMessages(document);
+    scheduleCleanup();
+  }
+
   function watchRouteChanges() {
-    window.addEventListener("popstate", () => scheduleApply(document));
-    window.addEventListener("pageshow", () => scheduleApply(document));
+    window.addEventListener("popstate", handleRouteChange);
+    window.addEventListener("pageshow", handleRouteChange);
 
     for (const method of ["pushState", "replaceState"]) {
       const original = history[method];
@@ -1927,7 +2109,7 @@
 
       const wrapped = function (...args) {
         const result = original.apply(this, args);
-        scheduleApply(document);
+        handleRouteChange();
         return result;
       };
 
@@ -1942,13 +2124,20 @@
       cachedDirectionForTextElement,
       cachedDirectionForTableCell,
       cachedDirectionForTableLayout,
+      isMessageNearViewport,
+      enqueueMessageForDirection,
+      processDirectionQueue,
       detectDirectionFromText
     });
     return;
   }
 
   installDebugInspector();
-  applyDirections(document, { fullReconcile: true });
+  setupMessageIntersectionObserver();
+  applyInteractiveDirections(document);
+  refreshObservedMessages(document);
+  applyDirectionToVisibleMessages(document);
+  scheduleCleanup();
   loadMode();
   document.addEventListener("input", handleComposerInput, true);
   document.addEventListener("focusin", handleComposerFocus, true);
