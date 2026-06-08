@@ -188,6 +188,7 @@
   const originalDirections = new WeakMap();
   const originalInlineStyles = new WeakMap();
   let selectedMode = DEFAULT_MODE;
+  let debugEnabled = false;
   let fullScanScheduled = false;
   let scheduled = false;
 
@@ -412,25 +413,54 @@
     return String(text || "").replace(/\s+/g, " ").trim().slice(0, limit);
   }
 
-  function elementSummary(element) {
+  function classNameForDebug(element) {
+    return typeof element.className === "string" ? element.className : String(element.getAttribute("class") || "");
+  }
+
+  function elementDirectionSummary(element) {
     if (!(element instanceof Element)) {
       return null;
     }
 
     return {
-      tag: element.tagName,
-      id: element.id || "",
-      class: typeof element.className === "string" ? element.className : String(element.getAttribute("class") || ""),
-      role: element.getAttribute("role") || "",
-      dataTestid: element.getAttribute("data-testid") || "",
       dir: element.getAttribute("dir") || "",
       styleDirection: element.style.direction || "",
-      textPreview: previewText(element.textContent, 120)
+      styleTextAlign: element.style.textAlign || "",
+      styleUnicodeBidi: element.style.unicodeBidi || ""
+    };
+  }
+
+  function elementSummary(element, includeText = true) {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    return {
+      tagName: element.tagName,
+      id: element.id || "",
+      className: classNameForDebug(element),
+      role: element.getAttribute("role") || "",
+      dataTestid: element.getAttribute("data-testid") || "",
+      ariaLabel: element.getAttribute("aria-label") || "",
+      placeholder: element.getAttribute("placeholder") || "",
+      dir: element.getAttribute("dir") || "",
+      styleDirection: element.style.direction || "",
+      styleTextAlign: element.style.textAlign || "",
+      styleUnicodeBidi: element.style.unicodeBidi || "",
+      isContentEditable: element.isContentEditable,
+      textContentPreview: includeText ? previewText(element.textContent, 120) : ""
     };
   }
 
   function closestElementSummary(element, selector) {
     return element instanceof Element ? elementSummary(element.closest(selector)) : null;
+  }
+
+  function isDebugEnabled() {
+    return Boolean(
+      debugEnabled ||
+      (document.documentElement && document.documentElement.dataset.cgptRtlDebug === "1")
+    );
   }
 
   function isFloatingDebugContext(element) {
@@ -452,59 +482,70 @@
     return hasResponseChangeMenuSignals(container) || Boolean(style && ["fixed", "absolute", "sticky"].includes(style.position));
   }
 
-  function debugEditableContext(element, reason, force = false) {
-    if (!(element instanceof Element) || (!force && (!window.__CGPT_RTL_DEBUG || !isFloatingDebugContext(element)))) {
-      return;
-    }
-
-    const container = responseChangeContainerFor(element);
-    const active = document.activeElement instanceof Element ? document.activeElement : null;
+  function parentChainForDebug(element) {
     const parentChain = [];
     let current = element;
     for (let depth = 0; current && depth < 8; depth += 1) {
       parentChain.push(elementSummary(current));
       current = current.parentElement;
     }
+    return parentChain;
+  }
 
+  function debugEditableContext(element, reason, force = false) {
+    if (!(element instanceof Element) || (!force && (!isDebugEnabled() || !isFloatingDebugContext(element)))) {
+      return;
+    }
+
+    const container = responseChangeContainerFor(element);
+    const active = document.activeElement instanceof Element ? document.activeElement : null;
+    const editingHost = getEditingHost(element);
+    const activeBlock = getActiveEditableBlock(element);
+    const wouldApplyKeyboardDirection = Boolean(isComposerElement(element) && editingHost);
     const diagnostic = {
       reason,
-      isResponseChangeComposer: isResponseChangeComposer(element),
+      selectedMode,
+      activeElement: elementSummary(active, false),
+      inspectedElement: elementSummary(element),
       isPromptLikeEditableAllowExcluded: isPromptLikeEditable(element, true),
-      tagName: element.tagName,
-      id: element.id || "",
-      className: typeof element.className === "string" ? element.className : String(element.getAttribute("class") || ""),
-      role: element.getAttribute("role") || "",
-      dir: element.getAttribute("dir") || "",
-      styleDirection: element.style.direction || "",
-      styleTextAlign: element.style.textAlign || "",
-      styleUnicodeBidi: element.style.unicodeBidi || "",
-      isContentEditable: element.isContentEditable,
-      placeholder: element.getAttribute("placeholder") || "",
-      ariaLabel: element.getAttribute("aria-label") || "",
-      dataPlaceholder: element.getAttribute("data-placeholder") || "",
-      dataTestid: element.getAttribute("data-testid") || "",
-      activeElement: active ? {
-        tag: active.tagName,
-        id: active.id || "",
-        class: typeof active.className === "string" ? active.className : String(active.getAttribute("class") || ""),
-        role: active.getAttribute("role") || ""
-      } : null,
+      isResponseChangeComposer: isResponseChangeComposer(element),
+      isAskToChangeResponseInput: isAskToChangeResponseInput(element),
+      isFocusedResponseChangeInput: isFocusedResponseChangeInput(element),
+      hasResponseChangeContext: hasResponseChangeContext(element),
+      isActiveEditableComposer: isActiveEditableComposer(element),
+      isComposerElement: isComposerElement(element),
+      responseChangeContainer: elementSummary(container),
+      hasResponseChangeMenuSignals: hasResponseChangeMenuSignals(container),
+      hasIconOnlySubmitButtonNearEditable: hasIconOnlySubmitButtonNearEditable(element, container),
+      editingHost: elementSummary(editingHost),
+      activeEditableBlock: elementSummary(activeBlock),
+      wouldApplyDirectionLikeKeyboardShortcut: wouldApplyKeyboardDirection,
+      directionState: {
+        element: elementDirectionSummary(element),
+        editingHost: elementDirectionSummary(editingHost),
+        activeBlock: elementDirectionSummary(activeBlock)
+      },
       closestForm: closestElementSummary(element, "form"),
       closestRoleMenuDialogPopover: closestElementSummary(element, "[role='menu'], [role='dialog'], [role='alertdialog'], [popover]"),
       closestRadixMenuPopupWrapper: closestElementSummary(element, "[data-radix-menu-content], [data-radix-popper-content-wrapper], [data-testid*='menu' i], [data-testid*='popover' i]"),
-      parentChain,
-      containerTextPreview: previewText(container && container.textContent, 500),
-      checks: {
-        isAskToChangeResponseInput: isAskToChangeResponseInput(element),
-        isFocusedResponseChangeInput: isFocusedResponseChangeInput(element),
-        hasResponseChangeContext: hasResponseChangeContext(element),
-        hasResponseChangeMenuSignals: hasResponseChangeMenuSignals(container),
-        isActiveEditableComposer: isActiveEditableComposer(element),
-        isComposerElement: isComposerElement(element)
-      }
+      parentChain: parentChainForDebug(element),
+      containerTextPreview: previewText(container && container.textContent, 500)
     };
 
     console.info("[ChatGPT Persian Direction] editable debug", diagnostic);
+  }
+
+  function debugDirectionApplied(element, direction, targets) {
+    if (!isDebugEnabled() || !(element instanceof Element) || !isResponseChangeComposer(element)) {
+      return;
+    }
+
+    console.info("[ChatGPT Persian Direction] response-change direction applied", {
+      selectedMode,
+      direction,
+      element: elementSummary(element),
+      targets: targets.map((target) => elementSummary(target, false))
+    });
   }
 
   function inspectActiveEditableContext() {
@@ -513,8 +554,25 @@
     debugEditableContext(editable, "manual", true);
   }
 
+  function handleDebugEvent(event) {
+    if (event.type === "cgpt-rtl-debug-enable") {
+      debugEnabled = true;
+      console.info("[ChatGPT Persian Direction] debug enabled");
+    } else if (event.type === "cgpt-rtl-debug-disable") {
+      debugEnabled = false;
+      if (document.documentElement) {
+        delete document.documentElement.dataset.cgptRtlDebug;
+      }
+      console.info("[ChatGPT Persian Direction] debug disabled");
+    } else if (event.type === "cgpt-rtl-inspect-active") {
+      inspectActiveEditableContext();
+    }
+  }
+
   function installDebugInspector() {
-    window.__CGPT_RTL_INSPECT_ACTIVE = inspectActiveEditableContext;
+    document.addEventListener("cgpt-rtl-debug-enable", handleDebugEvent);
+    document.addEventListener("cgpt-rtl-debug-disable", handleDebugEvent);
+    document.addEventListener("cgpt-rtl-inspect-active", handleDebugEvent);
   }
   function getComposerContainer(element) {
     if (isExcludedUiArea(element)) {
@@ -929,10 +987,12 @@
   }
 
   function applyDirectionToEditableTree(element, direction) {
-    for (const target of getEditableDirectionTargets(element)) {
+    const targets = [...getEditableDirectionTargets(element)];
+    for (const target of targets) {
       applyParagraphDirection(target, direction);
     }
     applyDirectionLikeKeyboardShortcut(element, direction);
+    debugDirectionApplied(element, direction, targets);
   }
 
   function applyDirectionToActiveEditables(root = document) {
@@ -1196,11 +1256,6 @@
         if (mutation.type === "characterData" || mutation.addedNodes.length > 0) {
           scheduleApply(mutation.target instanceof Element ? mutation.target : mutation.target.parentElement);
         }
-      }
-
-      const activeComposer = document.activeElement instanceof Element ? document.activeElement.closest(COMPOSER_SELECTOR) : null;
-      if (activeComposer) {
-        debugEditableContext(activeComposer, "mutation");
       }
     });
 

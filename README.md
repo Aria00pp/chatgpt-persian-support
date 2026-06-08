@@ -97,19 +97,28 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 
 ## Debugging response-change popup detection
 
-Diagnostics are disabled by default and only print local console output when explicitly enabled. To inspect the actual focused response-change input structure:
+Diagnostics are disabled by default and only print local console output when explicitly enabled. The content script listens for DOM events so commands from the normal page DevTools Console can trigger diagnostics despite Chrome's isolated content-script world.
+
+To inspect the response-change popup:
 
 1. Open DevTools Console.
 2. Run:
    ```js
-   window.__CGPT_RTL_DEBUG = true
+   document.dispatchEvent(new CustomEvent("cgpt-rtl-debug-enable"));
    ```
-3. Focus the "Ask to change response" input in the retry/try-again popup.
-4. Or run:
+3. Open the retry/try-again popup.
+4. Focus the top "Ask to change response" input.
+5. Run:
    ```js
-   window.__CGPT_RTL_INSPECT_ACTIVE()
+   document.dispatchEvent(new CustomEvent("cgpt-rtl-inspect-active"));
    ```
-5. Copy the console object, excluding any private text if needed. The diagnostic limits nearby text previews and does not send, store, or transmit any chat content.
+6. Copy the printed diagnostic object, excluding any private text if needed.
+7. Disable diagnostics when done:
+   ```js
+   document.dispatchEvent(new CustomEvent("cgpt-rtl-debug-disable"));
+   ```
+
+Alternatively, set `document.documentElement.dataset.cgptRtlDebug = "1"` before focusing the input. The diagnostic limits nearby text previews and does not send, store, or transmit any chat content.
 
 ## Privacy
 

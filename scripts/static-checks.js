@@ -71,8 +71,14 @@ assert(contentJs.includes('element.style.unicodeBidi = "plaintext"'), "confirmed
 assert(contentJs.includes("applyDirectionLikeKeyboardShortcut(element, direction)"), "keyboard-like paragraph direction helper must be used for editable targets");
 assert(contentJs.includes("window.getSelection"), "active selection/block helper must inspect the current editable block");
 assert(contentJs.includes("getKeyboardShortcutDirectionTargets(element)"), "inline style forcing must remain scoped to editable/composer targets");
-assert(contentJs.includes("window.__CGPT_RTL_DEBUG"), "debug logging must require an explicit global opt-in flag");
-assert(contentJs.includes("window.__CGPT_RTL_INSPECT_ACTIVE"), "manual active editable inspector must be exposed for local diagnostics");
+assert(contentJs.includes("let debugEnabled = false"), "diagnostic mode must be disabled by default");
+assert(contentJs.includes('document.addEventListener("cgpt-rtl-debug-enable", handleDebugEvent)'), "debug enable event listener must be installed");
+assert(contentJs.includes('document.addEventListener("cgpt-rtl-debug-disable", handleDebugEvent)'), "debug disable event listener must be installed");
+assert(contentJs.includes('document.addEventListener("cgpt-rtl-inspect-active", handleDebugEvent)'), "manual inspect event listener must be installed");
+assert(contentJs.includes('document.documentElement.dataset.cgptRtlDebug === "1"'), "diagnostics should also support documentElement dataset opt-in");
+assert(contentJs.includes('debugEditableContext(composer, "focusin")'), "focusin diagnostics must inspect prompt-like editables when enabled");
+assert(contentJs.includes('debugEditableContext(composer, "input")'), "input diagnostics must inspect prompt-like editables when enabled");
+assert(contentJs.includes("debugDirectionApplied(element, direction, targets)"), "response-change direction application must log targets when diagnostics are enabled");
 assert(contentJs.includes("console.info"), "diagnostics should log locally to the console only");
 assert(contentJs.includes("previewText(container && container.textContent, 500)"), "diagnostic container text must be limited");
 
