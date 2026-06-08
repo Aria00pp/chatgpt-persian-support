@@ -27,6 +27,9 @@ for (const helper of [
   "isInlineEditComposer",
   "isRetryComposer",
   "isResponseChangeComposer",
+  "isFocusedResponseChangeMenu",
+  "getResponseChangePseudoInputTargets",
+  "applyDirectionToResponseChangeMenu",
   "isAskToChangeResponseInput",
   "hasResponseChangeMenuSignals",
   "isFocusedResponseChangeInput",
@@ -79,6 +82,10 @@ assert(contentJs.includes('document.documentElement.dataset.cgptRtlDebug === "1"
 assert(contentJs.includes('debugEditableContext(composer, "focusin")'), "focusin diagnostics must inspect prompt-like editables when enabled");
 assert(contentJs.includes('debugEditableContext(composer, "input")'), "input diagnostics must inspect prompt-like editables when enabled");
 assert(contentJs.includes("debugDirectionApplied(element, direction, targets)"), "response-change direction application must log targets when diagnostics are enabled");
+assert(contentJs.includes("debugResponseChangeMenuApplied(menu, direction, directionTargets, menuItemRows)"), "focused menu direction application must log targets when diagnostics are enabled");
+assert(contentJs.includes("pseudoInputTargets"), "diagnostics must report response-change pseudo-input targets");
+assert(contentJs.includes("excludedMenuItemRows"), "diagnostics must report excluded/restored response-change menu rows");
+assert(contentJs.includes("applyDirectionToFocusedResponseChangeMenus(root)"), "apply pass must handle focused response-change menu pseudo-inputs");
 assert(contentJs.includes("console.info"), "diagnostics should log locally to the console only");
 assert(contentJs.includes("previewText(container && container.textContent, 500)"), "diagnostic container text must be limited");
 

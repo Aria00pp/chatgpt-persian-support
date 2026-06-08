@@ -120,6 +120,8 @@ To inspect the response-change popup:
 
 Alternatively, set `document.documentElement.dataset.cgptRtlDebug = "1"` before focusing the input. The diagnostic limits nearby text previews and does not send, store, or transmit any chat content.
 
+If the diagnostic shows `activeElement` as `role="menu"` with `editingHost: null`, that is expected for ChatGPT's response-change pseudo-input. The extension handles that path by detecting the focused response-change menu and applying direction to the menu's top pseudo-input/display targets while restoring the `Try again` and `Search the web` rows to normal menu direction.
+
 ## Privacy
 
 This extension stores only one local preference: the selected direction mode (`auto`, `rtl`, or `ltr`) in `chrome.storage.local`. It does **not** store prompt text, message text, chat content, or any other user data. It makes no network requests and contains no telemetry, analytics, or tracking.
