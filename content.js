@@ -50,10 +50,33 @@
     "[data-testid*='prompt' i]"
   ].join(",");
 
+  const EDIT_RETRY_CONTAINER_SELECTOR = [
+    "form",
+    "[data-testid*='edit' i]",
+    "[data-testid*='composer' i]",
+    "[data-testid*='prompt' i]",
+    "[data-testid*='retry' i]",
+    "[data-testid*='regenerate' i]"
+  ].join(",");
+
   const COMPOSER_CONTROL_SELECTOR = [
     "button[type='submit']",
     "button[data-testid*='send' i]",
     "button[aria-label*='send' i]",
+    "button[data-testid*='submit' i]",
+    "button[aria-label*='submit' i]",
+    "button[data-testid*='save' i]",
+    "button[aria-label*='save' i]",
+    "button[data-testid*='update' i]",
+    "button[aria-label*='update' i]",
+    "button[data-testid*='confirm' i]",
+    "button[aria-label*='confirm' i]",
+    "button[data-testid*='done' i]",
+    "button[aria-label*='done' i]",
+    "button[data-testid*='retry' i]",
+    "button[aria-label*='retry' i]",
+    "button[data-testid*='regenerate' i]",
+    "button[aria-label*='regenerate' i]",
     "button[data-testid*='voice' i]",
     "button[aria-label*='voice' i]",
     "button[data-testid*='upload' i]",
@@ -107,8 +130,37 @@
     "[role='treegrid']"
   ].join(",");
 
+  const EDIT_COMPOSER_EXCLUDED_SELECTOR = [
+    "pre",
+    "code",
+    "kbd",
+    "samp",
+    "table",
+    "math",
+    ".katex",
+    ".MathJax",
+    "[class*='code']",
+    "[class*='Code']",
+    "[class*='syntax']",
+    "[class*='highlight']",
+    "[class*='terminal' i]",
+    "[role='grid']",
+    "[role='treegrid']"
+  ].join(",");
+
+  const EDITABLE_DIRECTION_TARGET_SELECTOR = [
+    ".ProseMirror",
+    ".ProseMirror[contenteditable='true']",
+    "[contenteditable='true']",
+    "[role='textbox']",
+    "textarea",
+    "p",
+    "[data-placeholder]"
+  ].join(",");
+
   const pendingRoots = new Set();
   const originalDirections = new WeakMap();
+  const originalInlineStyles = new WeakMap();
   let selectedMode = DEFAULT_MODE;
   let fullScanScheduled = false;
   let scheduled = false;
@@ -140,11 +192,33 @@
 
   function normalizedInputHint(element) {
     return [
+      element.id,
       element.getAttribute("aria-label"),
       element.getAttribute("placeholder"),
       element.getAttribute("data-placeholder"),
-      element.getAttribute("name")
+      element.getAttribute("data-testid"),
+      element.getAttribute("name"),
+      element.getAttribute("type")
     ].filter(Boolean).join(" ").toLowerCase();
+  }
+
+  function normalizedContextHint(element, container) {
+    const hints = [normalizedInputHint(element)];
+    let current = element.parentElement;
+
+    while (current && current !== container.parentElement) {
+      hints.push(normalizedInputHint(current));
+      if (current === container) {
+        break;
+      }
+      current = current.parentElement;
+    }
+
+    for (const control of container.querySelectorAll("button, [role='button'], input[type='submit']")) {
+      hints.push(normalizedInputHint(control), control.textContent || "");
+    }
+
+    return hints.filter(Boolean).join(" ").toLowerCase();
   }
 
   function isExcludedUiArea(element) {
@@ -161,6 +235,18 @@
     );
   }
 
+  function isPromptLikeEditable(element) {
+    if (!element.matches(COMPOSER_SELECTOR) || isExcludedUiArea(element)) {
+      return false;
+    }
+
+    if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+      return !element.disabled && !element.readOnly && element.type !== "search";
+    }
+
+    return element.isContentEditable || element.getAttribute("role") === "textbox";
+  }
+
   function getComposerContainer(element) {
     if (isExcludedUiArea(element)) {
       return null;
@@ -174,19 +260,11 @@
     return container;
   }
 
-  function isLikelyComposerContainer(element) {
-    if (element.id === "prompt-textarea" && element.closest("main") && !isExcludedUiArea(element)) {
-      return true;
-    }
-
-    const container = getComposerContainer(element);
-    if (!container) {
-      return false;
-    }
-
+  function hasPromptContext(element, container) {
+    const contextHint = normalizedContextHint(element, container);
     const hasComposerControl = Boolean(container.querySelector(COMPOSER_CONTROL_SELECTOR));
-    const hasMessageHint = /message|prompt|ask|chatgpt|پیام|پرسش|سؤال|سوال|بنویس|اكتب|رسالة/.test(
-      normalizedInputHint(element)
+    const hasMessageHint = /message|prompt|ask|chatgpt|reply|write|پیام|پرسش|سؤال|سوال|بنویس|اكتب|رسالة/.test(
+      contextHint
     );
     const hasSemanticContainer = container.matches(
       "[data-testid*='composer' i], [data-testid*='prompt' i]"
@@ -195,16 +273,154 @@
     return hasComposerControl || hasMessageHint || hasSemanticContainer;
   }
 
+  function isMainComposer(element) {
+    if (!isPromptLikeEditable(element)) {
+      return false;
+    }
+
+    if (element.closest("[data-message-author-role], main article")) {
+      return false;
+    }
+
+    if (element.id === "prompt-textarea" && element.closest("main")) {
+      return true;
+    }
+
+    const container = getComposerContainer(element);
+    return Boolean(container && hasPromptContext(element, container));
+  }
+
+  function isVisibleConnected(element) {
+    return Boolean(element.isConnected && (element.getClientRects().length > 0 || element.offsetParent));
+  }
+
+  function isInUserMessageArea(element) {
+    if (element.closest("[data-message-author-role='user']")) {
+      return true;
+    }
+
+    const article = element.closest("main article");
+    return Boolean(
+      article &&
+      article.querySelector("[data-message-author-role='user']") &&
+      !article.querySelector("[data-message-author-role='assistant']")
+    );
+  }
+
+  function isUserMessageEditComposer(element) {
+    if (!isPromptLikeEditable(element) || !isVisibleConnected(element) || !isInUserMessageArea(element)) {
+      return false;
+    }
+
+    if (element.closest(`${EXCLUDED_UI_SELECTOR}, ${CONTROL_AREA_SELECTOR}, .${CONTROL_CLASS}`)) {
+      return false;
+    }
+
+    if (element.closest(EDIT_COMPOSER_EXCLUDED_SELECTOR)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function hasActiveEditControls(element) {
+    const container = element.closest(EDIT_RETRY_CONTAINER_SELECTOR) || element.parentElement;
+    if (!container || isExcludedUiArea(container)) {
+      return false;
+    }
+
+    return Boolean(container.querySelector(COMPOSER_CONTROL_SELECTOR));
+  }
+
+  function isFocusedWithin(element) {
+    const active = document.activeElement;
+    return Boolean(active && (element === active || element.contains(active)));
+  }
+
+  function isLikelyChatEditable(element) {
+    if (!isPromptLikeEditable(element) || !isVisibleConnected(element) || isMainComposer(element)) {
+      return false;
+    }
+
+    if (!element.closest("main") || isExcludedUiArea(element)) {
+      return false;
+    }
+
+    if (element.closest(`${EXCLUDED_UI_SELECTOR}, ${CONTROL_AREA_SELECTOR}, .${CONTROL_CLASS}`)) {
+      return false;
+    }
+
+    if (element.closest(EDIT_COMPOSER_EXCLUDED_SELECTOR)) {
+      return false;
+    }
+
+    if (isFocusedWithin(element) || hasActiveEditControls(element)) {
+      return true;
+    }
+
+    return Boolean(
+      element.matches("textarea, [contenteditable='true'], [role='textbox']") &&
+      !element.closest("[data-message-author-role='assistant'] .markdown, [data-message-author-role='assistant'] .prose")
+    );
+  }
+
+  function isActiveEditableComposer(element) {
+    return isUserMessageEditComposer(element) || isLikelyChatEditable(element);
+  }
+
+  function isInlineEditComposer(element) {
+    if (isUserMessageEditComposer(element)) {
+      return true;
+    }
+
+    if (!isPromptLikeEditable(element)) {
+      return false;
+    }
+
+    const article = element.closest("main article, [data-message-author-role]");
+    if (!article || isExcludedUiArea(article) || !isInUserMessageArea(element)) {
+      return false;
+    }
+
+    const container = element.closest(EDIT_RETRY_CONTAINER_SELECTOR) || article;
+    const contextHint = normalizedContextHint(element, container);
+    const hasEditSignal = /\b(edit|editing|update|save|submit|send|confirm|done|cancel|message|prompt)\b|ویرایش|ذخیره|ارسال|لغو|پیام/.test(
+      contextHint
+    );
+    const hasEditControls = Boolean(container.querySelector(COMPOSER_CONTROL_SELECTOR));
+    const closeToEditForm = Boolean(element.closest("form")) && hasEditControls;
+
+    return hasEditSignal && (hasEditControls || closeToEditForm || container !== article);
+  }
+
+  function isRetryComposer(element) {
+    if (!isPromptLikeEditable(element)) {
+      return false;
+    }
+
+    const container = element.closest(EDIT_RETRY_CONTAINER_SELECTOR) || getComposerContainer(element);
+    if (!container || !container.closest("main") || isExcludedUiArea(container)) {
+      return false;
+    }
+
+    const contextHint = normalizedContextHint(element, container);
+    const hasRetrySignal = /\b(retry|regenerate|again|resubmit|submit|send|prompt|message)\b|تلاش|دوباره|بازسازی|ارسال|پیام/.test(
+      contextHint
+    );
+
+    return hasRetrySignal && Boolean(container.querySelector(COMPOSER_CONTROL_SELECTOR));
+  }
+
+  function isLikelyComposerContainer(element) {
+    return isMainComposer(element) || isInlineEditComposer(element) || isRetryComposer(element);
+  }
+
   function isMessageElement(element) {
     return element.matches(MESSAGE_SELECTOR);
   }
 
   function isComposerElement(element) {
-    if (element.closest(`.${MESSAGE_CLASS}, [data-message-author-role], main article`)) {
-      return false;
-    }
-
-    return isLikelyComposerContainer(element);
+    return isMainComposer(element) || isInlineEditComposer(element) || isRetryComposer(element) || isActiveEditableComposer(element);
   }
 
   function topLevelTargets(elements) {
@@ -215,7 +431,7 @@
 
   function getMessageTextTargets(messageElement) {
     const proseTargets = [...messageElement.querySelectorAll(MESSAGE_PROSE_SELECTOR)]
-      .filter((element) => !element.closest(CONTROL_AREA_SELECTOR));
+      .filter((element) => !element.closest(`${CONTROL_AREA_SELECTOR}, ${COMPOSER_SELECTOR}`));
 
     if (proseTargets.length > 0) {
       return topLevelTargets(proseTargets);
@@ -224,7 +440,8 @@
     const messageIdTargets = [...messageElement.querySelectorAll("[data-message-id]")]
       .filter((element) => (
         element.querySelector(MESSAGE_TEXT_BLOCK_SELECTOR) &&
-        !element.querySelector(CONTROL_AREA_SELECTOR)
+        !element.querySelector(CONTROL_AREA_SELECTOR) &&
+        !element.querySelector(COMPOSER_SELECTOR)
       ));
 
     if (messageIdTargets.length > 0) {
@@ -232,7 +449,7 @@
     }
 
     const textBlockTargets = [...messageElement.querySelectorAll(MESSAGE_TEXT_BLOCK_SELECTOR)]
-      .filter((element) => !element.closest(`${TECHNICAL_SELECTOR}, [role='toolbar'], [role='menu']`));
+      .filter((element) => !element.closest(`${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, [role='toolbar'], [role='menu']`));
 
     if (textBlockTargets.length > 0) {
       return topLevelTargets(textBlockTargets);
@@ -275,24 +492,83 @@
     return detectDirectionFromText(kind === COMPOSER_CLASS ? composerText(element) : element.textContent);
   }
 
+
   function clearDirectionClasses(element) {
     element.classList.remove(...DIRECTION_CLASSES, ...LEGACY_CLASSES);
   }
 
-  function applyDirection(element, kind) {
-    const direction = directionFor(element, kind);
+  function applyDirection(element, kind, forcedDirection = null) {
+    const direction = forcedDirection || directionFor(element, kind);
     if (!originalDirections.has(element)) {
       originalDirections.set(element, element.getAttribute("dir"));
     }
     clearDirectionClasses(element);
     element.classList.add(APPLIED_CLASS, kind, `cgpt-dir-${selectedMode}`, `cgpt-dir-${direction}`);
     element.setAttribute("dir", direction);
+    return direction;
+  }
+
+  function applyInlineDirectionStyle(element, direction) {
+    if (!originalInlineStyles.has(element)) {
+      originalInlineStyles.set(element, {
+        direction: element.style.direction,
+        textAlign: element.style.textAlign
+      });
+    }
+
+    element.style.direction = direction;
+    element.style.textAlign = direction === "rtl" ? "right" : "left";
+  }
+
+  function restoreInlineDirectionStyle(element) {
+    if (!originalInlineStyles.has(element)) {
+      return;
+    }
+
+    const originalStyle = originalInlineStyles.get(element);
+    element.style.direction = originalStyle.direction;
+    element.style.textAlign = originalStyle.textAlign;
+    originalInlineStyles.delete(element);
+  }
+
+  function getEditableDirectionTargets(element) {
+    const targets = new Set();
+    if (element.matches(EDITABLE_DIRECTION_TARGET_SELECTOR)) {
+      targets.add(element);
+    }
+
+    if (typeof element.querySelectorAll === "function") {
+      for (const target of element.querySelectorAll(EDITABLE_DIRECTION_TARGET_SELECTOR)) {
+        if (!target.closest(`${CONTROL_AREA_SELECTOR}, ${EDIT_COMPOSER_EXCLUDED_SELECTOR}, .${CONTROL_CLASS}`)) {
+          targets.add(target);
+        }
+      }
+    }
+
+    return targets;
+  }
+
+  function applyDirectionToEditableTree(element, direction) {
+    for (const target of getEditableDirectionTargets(element)) {
+      applyDirection(target, COMPOSER_CLASS, direction);
+      applyInlineDirectionStyle(target, direction);
+    }
+  }
+
+  function applyDirectionToActiveEditables(root = document) {
+    for (const element of elementsMatching(root, COMPOSER_SELECTOR, true)) {
+      if (isActiveEditableComposer(element)) {
+        const direction = applyDirection(element, COMPOSER_CLASS);
+        applyDirectionToEditableTree(element, direction);
+      }
+    }
   }
 
   function removeDirection(element) {
     const hadDirectionClass = element.classList.contains(APPLIED_CLASS) ||
       LEGACY_CLASSES.some((className) => element.classList.contains(className));
 
+    restoreInlineDirectionStyle(element);
     element.classList.remove(APPLIED_CLASS, COMPOSER_CLASS, MESSAGE_CLASS, ...DIRECTION_CLASSES, ...LEGACY_CLASSES);
     if (hadDirectionClass && originalDirections.has(element)) {
       const originalDirection = originalDirections.get(element);
@@ -310,7 +586,8 @@
   function applyDirectionToComposer(root = document) {
     for (const element of elementsMatching(root, COMPOSER_SELECTOR, true)) {
       if (isComposerElement(element)) {
-        applyDirection(element, COMPOSER_CLASS);
+        const direction = applyDirection(element, COMPOSER_CLASS);
+        applyDirectionToEditableTree(element, direction);
       }
     }
   }
@@ -356,7 +633,7 @@
   }
 
   function ensureDirectionControl() {
-    const composers = [...document.querySelectorAll(COMPOSER_SELECTOR)].filter(isComposerElement);
+    const composers = [...document.querySelectorAll(COMPOSER_SELECTOR)].filter(isMainComposer);
     const composer = composers[0];
     if (!composer) {
       return;
@@ -387,6 +664,9 @@
     for (const composer of document.querySelectorAll(COMPOSER_SELECTOR)) {
       if (isComposerElement(composer)) {
         currentTargets.add(composer);
+        for (const target of getEditableDirectionTargets(composer)) {
+          currentTargets.add(target);
+        }
       }
     }
 
@@ -410,6 +690,7 @@
     try {
       reconcileAppliedElements();
       applyDirectionToComposer(root);
+      applyDirectionToActiveEditables(root);
       applyDirectionToMessages(root);
       ensureDirectionControl();
     } catch (_error) {
@@ -484,7 +765,16 @@
   function handleComposerInput(event) {
     const composer = event.target instanceof Element ? event.target.closest(COMPOSER_SELECTOR) : null;
     if (composer && isComposerElement(composer) && selectedMode === "auto") {
-      applyDirection(composer, COMPOSER_CLASS);
+      const direction = applyDirection(composer, COMPOSER_CLASS);
+      applyDirectionToEditableTree(composer, direction);
+    }
+  }
+
+  function handleComposerFocus(event) {
+    const composer = event.target instanceof Element ? event.target.closest(COMPOSER_SELECTOR) : null;
+    if (composer && isComposerElement(composer)) {
+      const direction = applyDirection(composer, COMPOSER_CLASS);
+      applyDirectionToEditableTree(composer, direction);
     }
   }
 
@@ -550,6 +840,7 @@
   applyDirections(document);
   loadMode();
   document.addEventListener("input", handleComposerInput, true);
+  document.addEventListener("focusin", handleComposerFocus, true);
   document.addEventListener("keydown", handleKeyboardShortcut, true);
   startObserver();
   watchRouteChanges();

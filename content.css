@@ -1,5 +1,8 @@
 /* Keep direction changes scoped to confirmed ChatGPT message text and the prompt composer. */
 .cgpt-dir-composer.cgpt-dir-rtl,
+.cgpt-dir-composer.cgpt-dir-rtl [contenteditable="true"],
+.cgpt-dir-composer.cgpt-dir-rtl [role="textbox"],
+.cgpt-dir-composer.cgpt-dir-rtl textarea,
 .cgpt-dir-composer.cgpt-dir-rtl p,
 .cgpt-dir-composer.cgpt-dir-rtl [data-placeholder],
 .cgpt-dir-message.cgpt-dir-rtl,
@@ -10,6 +13,9 @@
 }
 
 .cgpt-dir-composer.cgpt-dir-ltr,
+.cgpt-dir-composer.cgpt-dir-ltr [contenteditable="true"],
+.cgpt-dir-composer.cgpt-dir-ltr [role="textbox"],
+.cgpt-dir-composer.cgpt-dir-ltr textarea,
 .cgpt-dir-composer.cgpt-dir-ltr p,
 .cgpt-dir-composer.cgpt-dir-ltr [data-placeholder],
 .cgpt-dir-message.cgpt-dir-ltr,
@@ -36,6 +42,13 @@
 .cgpt-dir-message.cgpt-dir-ltr :is(ul, ol) {
   direction: ltr !important;
   text-align: left !important;
+}
+
+
+/* Inline formatting is isolated so mixed Persian-English prose stays readable without changing text. */
+.cgpt-dir-message :is(p, h1, h2, h3, h4, h5, h6, blockquote, li, dd, dt) :is(strong, b, em, i, span, q, a) {
+  direction: inherit;
+  unicode-bidi: isolate;
 }
 
 /* Technical content remains readable and keeps its expected LTR layout in every mode. */

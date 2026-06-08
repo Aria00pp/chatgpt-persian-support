@@ -12,6 +12,8 @@ The extension applies the selected mode to messages already on the page and uses
 - **LTR** makes the composer and message prose left-to-right and left-aligned.
 - **Auto** detects the first strong Persian/Arabic/Hebrew or Latin character. Composer direction updates live, while each message independently receives its detected direction. Empty or ambiguous text defaults to RTL.
 - Formats user and assistant message prose, including existing and dynamically generated content, without forcing action bars or surrounding controls into a direction.
+- Applies the selected direction to the main composer plus prompt-like edit and retry/regenerate input areas, including a full-document active-edit scan for ChatGPT edit boxes that appear outside the normal composer structure.
+- Uses CSS inline isolation for bold, italic, quote, link, and span content so mixed Persian-English prose is easier to read without mutating rendered message text or composer text.
 - Keeps code blocks, inline code, keyboard input, terminal-like output, tables, math, and common syntax-highlighted/editor elements LTR and left-aligned.
 - Does not replace, clone, wrap, or modify the text in ChatGPT's native composer.
 - Uses no external dependencies, remote code, network requests, telemetry, analytics, or tracking.
@@ -41,8 +43,8 @@ After changing extension files locally, click the extension's **Reload** button 
 ## Files
 
 - `manifest.json` — Manifest V3 configuration, narrowly scoped ChatGPT content-script matches, and the `storage` permission used only for the selected mode.
-- `content.js` — Safe composer/message detection, mode state and persistence, direction detection, accessible control injection, keyboard shortcuts, mutation observation, and SPA route handling.
-- `content.css` — Scoped RTL/LTR presentation, compact control styling, and LTR exceptions for technical content.
+- `content.js` — Safe main, edit, and retry composer/message detection; mode state and persistence; direction detection; accessible control injection; keyboard shortcuts; mutation observation; and SPA route handling.
+- `content.css` — Scoped RTL/LTR presentation, CSS inline bidi isolation for mixed prose, strengthened composer/edit direction styling, compact control styling, and LTR exceptions for technical content.
 
 ## Manual test checklist
 
@@ -55,6 +57,13 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] LTR mode makes English typing start from the left.
 - [ ] Auto mode makes Persian-first composer text RTL.
 - [ ] Auto mode makes English-first composer text LTR.
+- [ ] Edit a previous user message in RTL mode; the edit box is RTL and right-aligned.
+- [ ] Click the edit pencil in RTL mode; the edit text starts from the right immediately.
+- [ ] Type Persian in edit mode; text extends naturally from right to left.
+- [ ] Move the caret to the beginning/end in RTL edit mode; caret behavior feels RTL.
+- [ ] Edit a previous user message in LTR mode; the edit box is LTR and left-aligned for English text.
+- [ ] Edit a previous user message in Auto mode; direction updates live inside the edit box based on the edited text.
+- [ ] Retry/regenerate input flow receives the selected direction behavior.
 - [ ] Ctrl + Right Shift switches to RTL inside the composer.
 - [ ] Ctrl + Left Shift switches to LTR inside the composer.
 - [ ] Ctrl + Shift + A switches to Auto inside the composer.
@@ -62,13 +71,20 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] Existing user and assistant messages update after a mode switch.
 - [ ] Newly streamed assistant messages follow the selected mode and re-detect while streaming in Auto mode.
 - [ ] In Auto mode, Persian-first and English-first messages can have independent directions.
+- [ ] Mixed Persian-English text with bold, italic, quotes, and punctuation remains readable.
+- [ ] Ask ChatGPT: `به فارسی توضیح بده: Auto mode و shortcut و input handler و composer و target و live یعنی چه. از bold و italic هم استفاده کن.` Confirm English fragments remain visually stable inside the Persian paragraph.
+- [ ] English words such as `bug`, `polish`, `Auto mode`, and `direction` remain visually stable inside Persian-first prose when covered by CSS inline isolation.
+- [ ] Long normal messages are not truncated.
+- [ ] Streaming messages are not truncated.
+- [ ] No JS text-node wrapping is used on rendered ChatGPT messages.
 - [ ] Code blocks remain LTR and left-aligned in all modes.
-- [ ] Inline code remains readable.
+- [ ] Inline code remains LTR and readable.
 - [ ] Tables remain LTR and left-aligned.
 - [ ] Math remains readable.
 - [ ] Lists and blockquotes remain readable in RTL and LTR modes.
 - [ ] Sidebar, dialogs, search boxes, menus, settings panels, and the model selector remain normal.
-- [ ] Upload, voice, send, copy, retry/regenerate, feedback, and toolbar controls remain visually normal.
+- [ ] Upload, voice, send, copy, retry/regenerate, feedback, edit, and toolbar controls remain visually normal.
+- [ ] ChatGPT controls remain visually normal after switching modes.
 - [ ] Repeat the relevant checks on `https://chat.openai.com/` if that host is available for the account.
 
 ## Privacy
