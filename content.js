@@ -1000,18 +1000,120 @@
     return [authorRoleTarget || messageElement];
   }
 
-  function detectDirectionFromText(text) {
-    for (const character of text || "") {
-      if (/[\u0590-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/u.test(character)) {
-        return "rtl";
-      }
-
-      if (/[A-Za-z]/.test(character)) {
-        return "ltr";
-      }
+  function strongDirectionForCharacter(character) {
+    if (/[\u0590-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/u.test(character)) {
+      return "rtl";
     }
 
-    return "rtl";
+    if (/[A-Za-z]/.test(character)) {
+      return "ltr";
+    }
+
+    return null;
+  }
+
+  function getStrongDirectionStats(text, options = {}) {
+    const sampleLimit = options.sampleLimit || 200;
+    const characters = Array.from(String(text || ""));
+    let visibleIndex = 0;
+    let previousStrongDirection = null;
+    const stats = {
+      rtlCount: 0,
+      latinCount: 0,
+      rtlRuns: 0,
+      latinRuns: 0,
+      firstRtlIndex: -1,
+      firstLatinIndex: -1,
+      firstStrongDirection: null,
+      latinPrefixCount: 0
+    };
+
+    for (const character of characters) {
+      if (/\s/u.test(character)) {
+        continue;
+      }
+
+      if (visibleIndex >= sampleLimit) {
+        break;
+      }
+
+      const strongDirection = strongDirectionForCharacter(character);
+      if (strongDirection === "rtl") {
+        stats.rtlCount += 1;
+        if (stats.firstRtlIndex === -1) {
+          stats.firstRtlIndex = visibleIndex;
+        }
+        if (previousStrongDirection !== "rtl") {
+          stats.rtlRuns += 1;
+        }
+      } else if (strongDirection === "ltr") {
+        stats.latinCount += 1;
+        if (stats.firstLatinIndex === -1) {
+          stats.firstLatinIndex = visibleIndex;
+        }
+        if (stats.firstRtlIndex === -1) {
+          stats.latinPrefixCount += 1;
+        }
+        if (previousStrongDirection !== "ltr") {
+          stats.latinRuns += 1;
+        }
+      }
+
+      if (strongDirection) {
+        stats.firstStrongDirection = stats.firstStrongDirection || strongDirection;
+        previousStrongDirection = strongDirection;
+      }
+
+      visibleIndex += 1;
+    }
+
+    return stats;
+  }
+
+  function isShortLatinPrefixBeforeRtl(text, stats = getStrongDirectionStats(text)) {
+    if (stats.firstLatinIndex === -1 || stats.firstRtlIndex === -1) {
+      return false;
+    }
+
+    if (stats.firstLatinIndex > stats.firstRtlIndex || stats.firstRtlIndex > 50) {
+      return false;
+    }
+
+    if (stats.latinPrefixCount > 30 || stats.rtlCount < 4) {
+      return false;
+    }
+
+    return stats.rtlCount >= stats.latinCount * 0.55 || (stats.rtlRuns >= stats.latinRuns && stats.rtlCount >= stats.latinCount * 0.45) || stats.rtlCount >= 12;
+  }
+
+  function detectDirectionFromText(text, options = {}) {
+    const stats = getStrongDirectionStats(text, options);
+
+    if (stats.rtlCount === 0 && stats.latinCount === 0) {
+      return "rtl";
+    }
+
+    if (stats.rtlCount === 0) {
+      return "ltr";
+    }
+
+    if (stats.latinCount === 0) {
+      return "rtl";
+    }
+
+    if (isShortLatinPrefixBeforeRtl(text, stats)) {
+      return "rtl";
+    }
+
+    if (stats.rtlCount >= stats.latinCount) {
+      return "rtl";
+    }
+
+    if (stats.firstStrongDirection === "rtl") {
+      return stats.latinCount > stats.rtlCount * 2.5 ? "ltr" : "rtl";
+    }
+
+    return stats.latinCount >= stats.rtlCount * 1.8 ? "ltr" : "rtl";
   }
 
   function composerText(element) {
@@ -1057,7 +1159,7 @@
 
     element.style.direction = direction;
     element.style.textAlign = direction === "rtl" ? "right" : "left";
-    element.style.unicodeBidi = "plaintext";
+    element.style.unicodeBidi = "isolate";
   }
 
   function restoreInlineDirectionStyle(element) {

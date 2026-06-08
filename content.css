@@ -9,7 +9,7 @@
 .cgpt-dir-message.cgpt-dir-rtl :is(p, h1, h2, h3, h4, h5, h6, blockquote, li, dd, dt) {
   direction: rtl !important;
   text-align: right !important;
-  unicode-bidi: plaintext !important;
+  unicode-bidi: isolate !important;
 }
 
 .cgpt-dir-composer.cgpt-dir-ltr,
@@ -22,7 +22,7 @@
 .cgpt-dir-message.cgpt-dir-ltr :is(p, h1, h2, h3, h4, h5, h6, blockquote, li, dd, dt) {
   direction: ltr !important;
   text-align: left !important;
-  unicode-bidi: plaintext !important;
+  unicode-bidi: isolate !important;
 }
 
 .cgpt-dir-message.cgpt-dir-rtl :is(ul, ol) {
