@@ -1024,18 +1024,54 @@
     return true;
   }
 
-  function directionForTableCell(cellElement) {
-    return detectDirectionFromText(cellElement.textContent, { sampleLimit: 300 });
+  function tableHeaderText(tableElement) {
+    const firstHeaderRow = tableElement.tHead && tableElement.tHead.rows.length > 0
+      ? tableElement.tHead.rows[0]
+      : [...tableElement.querySelectorAll("tr")].find((rowElement) => rowElement.querySelector("th"));
+
+    if (firstHeaderRow) {
+      const headerText = [...firstHeaderRow.querySelectorAll("th")]
+        .map((cellElement) => cellElement.textContent || "")
+        .join(" ")
+        .trim();
+
+      if (headerText) {
+        return headerText;
+      }
+    }
+
+    const firstRow = tableElement.querySelector("tr");
+    if (!firstRow) {
+      return "";
+    }
+
+    return [...firstRow.querySelectorAll("th, td")]
+      .map((cellElement) => cellElement.textContent || "")
+      .join(" ")
+      .trim();
   }
 
-  function applyStableDirectionToTable(tableElement) {
+  function directionForTableLayout(tableElement) {
+    if (selectedMode === "rtl" || selectedMode === "ltr") {
+      return selectedMode;
+    }
+
+    const headerText = tableHeaderText(tableElement);
+    return detectDirectionFromText(headerText || tableElement.textContent);
+  }
+
+  function directionForTableCell(cellElement) {
+    return detectDirectionFromText(cellElement.textContent);
+  }
+
+  function applyStableDirectionToTable(tableElement, direction) {
     if (!originalDirections.has(tableElement)) {
       originalDirections.set(tableElement, tableElement.getAttribute("dir"));
     }
 
     clearDirectionClasses(tableElement);
-    tableElement.classList.add(APPLIED_CLASS, TABLE_CLASS);
-    tableElement.setAttribute("dir", "ltr");
+    tableElement.classList.add(APPLIED_CLASS, TABLE_CLASS, `cgpt-dir-${direction}`);
+    tableElement.setAttribute("dir", direction);
   }
 
   function applyDirectionToTableCell(cellElement) {
@@ -1055,7 +1091,8 @@
       return;
     }
 
-    applyStableDirectionToTable(tableElement);
+    const layoutDirection = directionForTableLayout(tableElement);
+    applyStableDirectionToTable(tableElement, layoutDirection);
     for (const cellElement of tableElement.querySelectorAll("th, td")) {
       applyDirectionToTableCell(cellElement);
     }

@@ -2,7 +2,7 @@
 
 A small, dependency-free Manifest V3 Chrome extension that adds **Auto**, **RTL**, and **LTR** writing-direction modes to ChatGPT. It formats only the prompt composer and conversation prose while leaving ChatGPT's surrounding interface unchanged.
 
-The extension applies the selected mode to messages already on the page and uses a batched `MutationObserver` plus SPA route hooks for streamed responses, newly added messages, replaced composers, and chat navigation. Code, technical snippets, and math remain left-to-right in every mode, while prose tables keep stable column order and manage direction per cell.
+The extension applies the selected mode to messages already on the page and uses a batched `MutationObserver` plus SPA route hooks for streamed responses, newly added messages, replaced composers, and chat navigation. Code, technical snippets, and math remain left-to-right in every mode, while prose tables use a mode/header-aware layout direction and manage text direction per cell.
 
 ## Features
 
@@ -14,7 +14,7 @@ The extension applies the selected mode to messages already on the page and uses
 - Formats user and assistant message prose, including existing and dynamically generated content, without forcing action bars or surrounding controls into a direction.
 - Applies the selected direction to the main composer plus prompt-like edit and retry/regenerate input areas, including a full-document active-edit scan for ChatGPT edit boxes that appear outside the normal composer structure.
 - Uses CSS inline isolation for bold, italic, quote, link, and span content so mixed Persian-English prose is easier to read without mutating rendered message text or composer text.
-- Keeps code blocks, inline code, keyboard input, terminal-like output, math, and common syntax-highlighted/editor elements LTR and left-aligned; prose table cells are detected independently so Persian, English, and mixed cells remain readable without flipping table columns.
+- Keeps code blocks, inline code, keyboard input, terminal-like output, math, and common syntax-highlighted/editor elements LTR and left-aligned; prose table layout follows RTL/LTR mode or header-detected Auto direction, while cells are detected independently so Persian, English, and mixed cells remain readable.
 - Does not replace, clone, wrap, or modify the text in ChatGPT's native composer.
 - Uses no external dependencies, remote code, network requests, telemetry, analytics, or tracking.
 
@@ -94,16 +94,16 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] Code blocks remain LTR and left-aligned in all modes.
 - [ ] Inline code remains LTR and readable.
 - [ ] Tables keep stable column order and do not flip unpredictably.
+- [ ] In Auto and RTL modes, Persian/RTL table headers place the first logical column on the right and the last logical column on the left.
+- [ ] English-only tables remain readable and keep expected LTR column order in Auto and LTR modes.
 - [ ] In Auto, RTL, and LTR modes, paste or ask for this table and confirm each `th` and `td` is direction-managed independently while inline code stays LTR inside cells:
 
-  | نوع متن | نمونه |
-  |---|---|
-  | فارسی کامل | این متن کاملاً فارسی است و باید راست‌به‌چپ خوانده شود. |
-  | English only | This text is fully English and should stay left-to-right. |
-  | فارسی با English وسط | این متن شامل Auto mode و edit mode در وسط جمله است. |
-  | English prefix + فارسی | PR 5: edit mode شد و مشکل پیام‌ها رفع شد. |
-  | فارسی prefix + English | حالت Auto باید PR 7 و popup را درست نمایش بدهد. |
-  | عبارت فنی مخلوط | Ask to change response مربوط به popup حالا درست کار می‌کند. |
+  | نوع محتوا | نمونه فارسی/English | وضعیت expected | یادداشت فنی |
+  |---|---|---|---|
+  | فارسی کامل | این متن کاملاً فارسی است و باید از راست خوانده شود. | RTL / right-aligned | بدون عبارت انگلیسی |
+  | English only | This cell is fully English and should stay left-to-right. | LTR / left-aligned | pure English |
+  | فارسی با English وسط | این سلول شامل Auto mode و edit mode و popup در وسط جمله است. | RTL / readable | mixed inline terms |
+  | English prefix + فارسی | PR 12: table direction برای cellها باید درست شود. | RTL / readable | English prefix |
 - [ ] Math remains readable.
 - [ ] Lists and blockquotes remain readable in RTL and LTR modes.
 - [ ] Sidebar, dialogs, search boxes, menus, settings panels, and the model selector remain normal.

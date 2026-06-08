@@ -62,10 +62,17 @@
   unicode-bidi: isolate !important;
 }
 
-/* Tables keep their native column order while each header/data cell gets its own text direction. */
+/* Tables use a separate layout direction for column order while each header/data cell gets its own text direction. */
 .cgpt-dir-table {
-  direction: ltr !important;
   unicode-bidi: isolate !important;
+}
+
+.cgpt-dir-table.cgpt-dir-rtl {
+  direction: rtl !important;
+}
+
+.cgpt-dir-table.cgpt-dir-ltr {
+  direction: ltr !important;
 }
 
 .cgpt-dir-table .cgpt-dir-table-cell.cgpt-dir-rtl {

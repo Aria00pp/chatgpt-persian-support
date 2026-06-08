@@ -57,6 +57,8 @@ for (const helper of [
   "isTableElement",
   "getTableDirectionTargets",
   "shouldDirectionManageTable",
+  "tableHeaderText",
+  "directionForTableLayout",
   "directionForTableCell",
   "applyDirectionToTableCells"
 ]) {
@@ -106,8 +108,13 @@ assert(contentJs.includes("previewText(container && container.textContent, 500)"
 assert(contentJs.includes('for (const tableElement of getTableDirectionTargets(messageElement))'), "message apply pass must process tables separately from prose targets");
 assert(/function directionForTableCell\(cellElement\) \{[\s\S]*?detectDirectionFromText\(cellElement\.textContent/.test(contentJs), "table cell direction must use text detection per cell");
 assert(/function applyDirectionToTableCells\(tableElement\) \{[\s\S]*?querySelectorAll\("th, td"\)/.test(contentJs), "table direction must be applied independently to th and td cells");
-assert(contentJs.includes('tableElement.setAttribute("dir", "ltr")'), "table element must keep stable LTR column layout");
+assert(/function directionForTableLayout\(tableElement\) \{[\s\S]*?tableHeaderText\(tableElement\)[\s\S]*?detectDirectionFromText/.test(contentJs), "table layout direction must be computed from headers/table text in Auto mode");
+assert(contentJs.includes('applyStableDirectionToTable(tableElement, layoutDirection)'), "computed table layout direction must be applied to the table element");
+assert(contentJs.includes('tableElement.setAttribute("dir", direction)'), "table dir attribute must use computed layout direction");
+assert(!contentJs.includes('tableElement.setAttribute("dir", "ltr")'), "table layout direction must not be hardcoded to LTR");
 assert(contentCss.includes(".cgpt-dir-table"), "scoped table direction class must be styled");
+assert(contentCss.includes(".cgpt-dir-table.cgpt-dir-rtl"), "RTL table layout class must be styled");
+assert(contentCss.includes(".cgpt-dir-table.cgpt-dir-ltr"), "LTR table layout class must be styled");
 assert(contentCss.includes(".cgpt-dir-table-cell.cgpt-dir-rtl"), "RTL table cell class must be styled");
 assert(contentCss.includes(".cgpt-dir-table-cell.cgpt-dir-ltr"), "LTR table cell class must be styled");
 assert(!/table\s*\{[^}]*direction\s*:\s*rtl/im.test(contentCss), "must not use broad table { direction: rtl }");
