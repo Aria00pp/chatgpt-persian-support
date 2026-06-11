@@ -197,6 +197,19 @@
     "[data-radix-popper-content-wrapper]"
   ].join(",");
 
+
+  const CANVAS_DOCUMENT_SIGNAL_SELECTOR = [
+    "[data-testid*='canvas' i]",
+    "[data-testid*='artifact' i]",
+    "[data-testid*='document-preview' i]",
+    "[data-testid*='document_preview' i]",
+    "[aria-label*='canvas' i]",
+    "[aria-label*='document preview' i]",
+    "[class*='canvas' i]",
+    "[class*='artifact' i]",
+    "[class*='document-preview' i]"
+  ].join(",");
+
   const MESSAGE_OBSERVER_ROOT_MARGIN = "1200px 0px";
   const MESSAGE_OBSERVER_MARGIN_PX = 1200;
   const MAX_MESSAGES_PER_FRAME = 6;
@@ -218,6 +231,30 @@
   let perfStats = null;
   const messageDirectionQueue = new Set();
   const observedMessages = new WeakSet();
+
+
+  function isCanvasDocumentBlock(element) {
+    return Boolean(element instanceof Element && element.matches(CANVAS_DOCUMENT_SIGNAL_SELECTOR));
+  }
+
+  function canvasDocumentContainerFor(element) {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    return element.closest(CANVAS_DOCUMENT_SIGNAL_SELECTOR);
+  }
+
+  function isInsideCanvasDocumentBlock(element) {
+    return Boolean(canvasDocumentContainerFor(element));
+  }
+
+  function containsCanvasDocumentBlock(element) {
+    return Boolean(
+      element instanceof Element &&
+      (isCanvasDocumentBlock(element) || element.querySelector(CANVAS_DOCUMENT_SIGNAL_SELECTOR))
+    );
+  }
 
   function elementsMatching(root, selector, includeClosest = false) {
     const matches = new Set();
@@ -392,6 +429,10 @@
   }
 
   function isFocusedResponseChangeInput(element) {
+    if (isInsideCanvasDocumentBlock(element)) {
+      return false;
+    }
+
     if (!isPromptLikeEditable(element, true) || !isVisibleConnected(element) || !isFocusedWithin(element)) {
       return false;
     }
@@ -401,6 +442,10 @@
   }
 
   function hasResponseChangeContext(element) {
+    if (isInsideCanvasDocumentBlock(element)) {
+      return false;
+    }
+
     if (!isPromptLikeEditable(element, true) || !isVisibleConnected(element)) {
       return false;
     }
@@ -419,6 +464,10 @@
   }
 
   function isResponseChangeComposer(element) {
+    if (isInsideCanvasDocumentBlock(element)) {
+      return false;
+    }
+
     if (!isPromptLikeEditable(element, true) || !isVisibleConnected(element)) {
       return false;
     }
@@ -825,6 +874,10 @@
   }
 
   function isMainComposer(element) {
+    if (isInsideCanvasDocumentBlock(element)) {
+      return false;
+    }
+
     if (!isPromptLikeEditable(element)) {
       return false;
     }
@@ -859,6 +912,10 @@
   }
 
   function isUserMessageEditComposer(element) {
+    if (isInsideCanvasDocumentBlock(element)) {
+      return false;
+    }
+
     if (!isPromptLikeEditable(element) || !isVisibleConnected(element) || !isInUserMessageArea(element)) {
       return false;
     }
@@ -889,7 +946,7 @@
   }
 
   function isLikelyChatEditable(element) {
-    if (!isPromptLikeEditable(element) || !isVisibleConnected(element) || isMainComposer(element)) {
+    if (isInsideCanvasDocumentBlock(element) || !isPromptLikeEditable(element) || !isVisibleConnected(element) || isMainComposer(element)) {
       return false;
     }
 
@@ -916,10 +973,18 @@
   }
 
   function isActiveEditableComposer(element) {
+    if (isInsideCanvasDocumentBlock(element)) {
+      return false;
+    }
+
     return isUserMessageEditComposer(element) || isLikelyChatEditable(element) || isResponseChangeComposer(element);
   }
 
   function isInlineEditComposer(element) {
+    if (isInsideCanvasDocumentBlock(element)) {
+      return false;
+    }
+
     if (isUserMessageEditComposer(element)) {
       return true;
     }
@@ -945,6 +1010,10 @@
   }
 
   function isRetryComposer(element) {
+    if (isInsideCanvasDocumentBlock(element)) {
+      return false;
+    }
+
     if (!isPromptLikeEditable(element)) {
       return false;
     }
@@ -963,6 +1032,10 @@
   }
 
   function isLikelyComposerContainer(element) {
+    if (isInsideCanvasDocumentBlock(element)) {
+      return false;
+    }
+
     return isMainComposer(element) || isInlineEditComposer(element) || isRetryComposer(element) || isResponseChangeComposer(element);
   }
 
@@ -971,6 +1044,10 @@
   }
 
   function isComposerElement(element) {
+    if (isInsideCanvasDocumentBlock(element)) {
+      return false;
+    }
+
     return isMainComposer(element) || isInlineEditComposer(element) || isRetryComposer(element) || isResponseChangeComposer(element) || isActiveEditableComposer(element);
   }
 
@@ -981,8 +1058,12 @@
   }
 
   function getMessageTextTargets(messageElement) {
+    if (isInsideCanvasDocumentBlock(messageElement)) {
+      return [];
+    }
+
     const proseTargets = [...messageElement.querySelectorAll(MESSAGE_PROSE_SELECTOR)]
-      .filter((element) => !element.closest(`${CONTROL_AREA_SELECTOR}, ${COMPOSER_SELECTOR}`));
+      .filter((element) => !isInsideCanvasDocumentBlock(element) && !containsCanvasDocumentBlock(element) && !element.closest(`${CONTROL_AREA_SELECTOR}, ${COMPOSER_SELECTOR}`));
 
     if (proseTargets.length > 0) {
       return topLevelTargets(proseTargets);
@@ -990,9 +1071,11 @@
 
     const messageIdTargets = [...messageElement.querySelectorAll("[data-message-id]")]
       .filter((element) => (
+        !isInsideCanvasDocumentBlock(element) &&
         element.querySelector(MESSAGE_TEXT_BLOCK_SELECTOR) &&
         !element.querySelector(CONTROL_AREA_SELECTOR) &&
-        !element.querySelector(COMPOSER_SELECTOR)
+        !element.querySelector(COMPOSER_SELECTOR) &&
+        !containsCanvasDocumentBlock(element)
       ));
 
     if (messageIdTargets.length > 0) {
@@ -1000,7 +1083,7 @@
     }
 
     const textBlockTargets = [...messageElement.querySelectorAll(MESSAGE_TEXT_BLOCK_SELECTOR)]
-      .filter((element) => !element.closest(`${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, [role='toolbar'], [role='menu']`));
+      .filter((element) => !isInsideCanvasDocumentBlock(element) && !element.closest(`${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, [role='toolbar'], [role='menu']`));
 
     if (textBlockTargets.length > 0) {
       return topLevelTargets(textBlockTargets);
@@ -1010,7 +1093,12 @@
       ? messageElement
       : messageElement.querySelector("[data-message-author-role='user'], [data-message-author-role='assistant']");
 
-    return [authorRoleTarget || messageElement];
+    const fallbackTarget = authorRoleTarget || messageElement;
+    if (isInsideCanvasDocumentBlock(fallbackTarget) || containsCanvasDocumentBlock(fallbackTarget)) {
+      return [];
+    }
+
+    return [fallbackTarget];
   }
 
   function isTableElement(element) {
@@ -1018,12 +1106,16 @@
   }
 
   function getTableDirectionTargets(messageElement) {
+    if (isInsideCanvasDocumentBlock(messageElement)) {
+      return [];
+    }
+
     return [...messageElement.querySelectorAll("table")]
-      .filter((tableElement) => shouldDirectionManageTable(tableElement));
+      .filter((tableElement) => !isInsideCanvasDocumentBlock(tableElement) && shouldDirectionManageTable(tableElement));
   }
 
   function shouldDirectionManageTable(tableElement) {
-    if (!isTableElement(tableElement)) {
+    if (isInsideCanvasDocumentBlock(tableElement) || !isTableElement(tableElement)) {
       return false;
     }
 
@@ -1088,7 +1180,7 @@
   }
 
   function applyDirectionToTableCells(tableElement) {
-    if (!shouldDirectionManageTable(tableElement)) {
+    if (isInsideCanvasDocumentBlock(tableElement) || !shouldDirectionManageTable(tableElement)) {
       return;
     }
 
@@ -1300,6 +1392,10 @@
   }
 
   function applyDirection(element, kind, forcedDirection = null) {
+    if (isInsideCanvasDocumentBlock(element)) {
+      return forcedDirection || selectedMode;
+    }
+
     const direction = forcedDirection || directionFor(element, kind);
     const desiredClasses = [APPLIED_CLASS, kind, `cgpt-dir-${selectedMode}`, `cgpt-dir-${direction}`];
     const currentDir = element.getAttribute("dir");
@@ -1338,6 +1434,10 @@
   }
 
   function applyInlineDirectionStyle(element, direction) {
+    if (isInsideCanvasDocumentBlock(element)) {
+      return;
+    }
+
     const textAlign = direction === "rtl" ? "right" : "left";
     if (element.style.direction === direction && element.style.textAlign === textAlign && element.style.unicodeBidi === "isolate") {
       if (perfStats) {
@@ -1407,7 +1507,7 @@
 
   function getActiveEditableBlock(element) {
     const host = getEditingHost(element);
-    if (!host || host instanceof HTMLTextAreaElement || host instanceof HTMLInputElement) {
+    if (!host || isInsideCanvasDocumentBlock(host) || host instanceof HTMLTextAreaElement || host instanceof HTMLInputElement) {
       return host;
     }
 
@@ -1450,6 +1550,9 @@
   function getKeyboardShortcutDirectionTargets(element) {
     const targets = new Set();
     const host = getEditingHost(element) || element;
+    if (isInsideCanvasDocumentBlock(host)) {
+      return targets;
+    }
 
     if (host instanceof HTMLTextAreaElement || host instanceof HTMLInputElement) {
       targets.add(host);
@@ -1482,13 +1585,17 @@
 
   function getEditableDirectionTargets(element) {
     const targets = new Set();
+    if (isInsideCanvasDocumentBlock(element)) {
+      return targets;
+    }
+
     if (element.matches(EDITABLE_DIRECTION_TARGET_SELECTOR)) {
       targets.add(element);
     }
 
     if (typeof element.querySelectorAll === "function") {
       for (const target of element.querySelectorAll(EDITABLE_DIRECTION_TARGET_SELECTOR)) {
-        if (!isEditableDirectionExcluded(target, isResponseChangeComposer(getEditingHost(element) || element))) {
+        if (!isInsideCanvasDocumentBlock(target) && !isEditableDirectionExcluded(target, isResponseChangeComposer(getEditingHost(element) || element))) {
           targets.add(target);
         }
       }
@@ -1511,8 +1618,12 @@
   }
 
   function applyDirectionToActiveEditables(root = document) {
+    if (root instanceof Element && isInsideCanvasDocumentBlock(root)) {
+      return;
+    }
+
     for (const element of elementsMatching(root, COMPOSER_SELECTOR, true)) {
-      if (isActiveEditableComposer(element)) {
+      if (!isInsideCanvasDocumentBlock(element) && isActiveEditableComposer(element)) {
         const direction = applyDirection(element, COMPOSER_CLASS);
         applyDirectionToEditableTree(element, direction);
       }
@@ -1555,8 +1666,12 @@
   }
 
   function applyDirectionToComposer(root = document) {
+    if (root instanceof Element && isInsideCanvasDocumentBlock(root)) {
+      return;
+    }
+
     for (const element of elementsMatching(root, COMPOSER_SELECTOR, true)) {
-      if (isComposerElement(element)) {
+      if (!isInsideCanvasDocumentBlock(element) && isComposerElement(element)) {
         const direction = applyDirection(element, COMPOSER_CLASS);
         applyDirectionToEditableTree(element, direction);
       }
@@ -1564,8 +1679,12 @@
   }
 
   function applyDirectionToMessages(root = document) {
+    if (root instanceof Element && isInsideCanvasDocumentBlock(root)) {
+      return;
+    }
+
     for (const messageElement of elementsMatching(root, MESSAGE_SELECTOR, true)) {
-      if (!isMessageElement(messageElement)) {
+      if (isInsideCanvasDocumentBlock(messageElement) || !isMessageElement(messageElement)) {
         continue;
       }
 
@@ -1853,6 +1972,10 @@
   }
 
   function applyDirections(root = document, options = {}) {
+    if (root instanceof Element && isInsideCanvasDocumentBlock(root)) {
+      return undefined;
+    }
+
     return withPerfStats("apply pass", () => {
       if (options.fullReconcile) {
         reconcileAppliedElements();
@@ -1895,6 +2018,10 @@
   }
 
   function scheduleApply(root = document, options = {}) {
+    if (root instanceof Element && isInsideCanvasDocumentBlock(root)) {
+      return;
+    }
+
     const fullScan = Boolean(options.fullScan) || root === document || root === document.documentElement;
     if (fullScan) {
       fullScanScheduled = true;
@@ -2060,13 +2187,18 @@
         }
 
         const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
-        if (!target) {
+        if (!target || isInsideCanvasDocumentBlock(target)) {
           continue;
         }
 
-        const addedElementCount = [...mutation.addedNodes].filter((node) => node instanceof Element).length;
-        const addedLargeSubtree = [...mutation.addedNodes].some((node) => (
-          node instanceof Element && node.querySelectorAll && node.querySelectorAll(`${MESSAGE_SELECTOR}, ${COMPOSER_SELECTOR}, table`).length > 4
+        const addedElements = [...mutation.addedNodes].filter((node) => node instanceof Element);
+        if (addedElements.some((element) => isInsideCanvasDocumentBlock(element) || containsCanvasDocumentBlock(element))) {
+          continue;
+        }
+
+        const addedElementCount = addedElements.length;
+        const addedLargeSubtree = addedElements.some((node) => (
+          node.querySelectorAll && node.querySelectorAll(`${MESSAGE_SELECTOR}, ${COMPOSER_SELECTOR}, table`).length > 4
         ));
         if (addedElementCount > 8 || addedLargeSubtree) {
           applyInteractiveDirections(document);

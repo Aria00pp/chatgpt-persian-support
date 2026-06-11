@@ -19,6 +19,34 @@ for (const api of ["fetch(", "XMLHttpRequest", "sendBeacon", "WebSocket"]) {
   assert(!contentJs.includes(api), `network API must not be used: ${api}`);
 }
 
+
+assert(contentJs.includes("const CANVAS_DOCUMENT_SIGNAL_SELECTOR"), "Canvas/document preview signal selector must exist");
+assert(!contentJs.includes("TreeWalker"), "TreeWalker must not be used for Canvas or message scanning");
+
+for (const eventName of ["selectionchange", "selectstart", "copy", "pointerdown", "pointerup", "pointermove", "mousedown", "mouseup", "mousemove", "mouseover", "mouseout", "mouseenter", "mouseleave"]) {
+  assert(
+    !new RegExp(`addEventListener\\(\\s*['\"]${eventName}['\"]`).test(contentJs),
+    `must not install ${eventName} guards`
+  );
+}
+
+assert(/function isComposerElement\(element\) \{[\s\S]*?isInsideCanvasDocumentBlock\(element\)[\s\S]*?return false/.test(contentJs), "Canvas elements must be excluded from composer detection");
+assert(/function isLikelyChatEditable\(element\) \{[\s\S]*?isInsideCanvasDocumentBlock\(element\)/.test(contentJs), "Canvas elements must be excluded from likely editable detection");
+assert(/function isActiveEditableComposer\(element\) \{[\s\S]*?isInsideCanvasDocumentBlock\(element\)[\s\S]*?return false/.test(contentJs), "Canvas elements must be excluded from active editable composer detection");
+assert(/function getActiveEditableBlock\(element\) \{[\s\S]*?isInsideCanvasDocumentBlock\(host\)[\s\S]*?window\.getSelection/.test(contentJs), "Canvas editable targets must return before selection-based logic");
+assert(/function getEditableDirectionTargets\(element\) \{[\s\S]*?isInsideCanvasDocumentBlock\(element\)[\s\S]*?return targets/.test(contentJs), "Canvas elements must not receive editable direction targets");
+assert(/function getKeyboardShortcutDirectionTargets\(element\) \{[\s\S]*?isInsideCanvasDocumentBlock\(host\)[\s\S]*?return targets/.test(contentJs), "Canvas elements must not receive shortcut direction targets");
+assert(/function applyDirectionToComposer\(root = document\) \{[\s\S]*?isInsideCanvasDocumentBlock\(root\)[\s\S]*?return[\s\S]*?!isInsideCanvasDocumentBlock\(element\)/.test(contentJs), "Canvas elements must be excluded from composer direction passes");
+assert(/function applyDirectionToActiveEditables\(root = document\) \{[\s\S]*?isInsideCanvasDocumentBlock\(root\)[\s\S]*?return[\s\S]*?!isInsideCanvasDocumentBlock\(element\)/.test(contentJs), "Canvas elements must be excluded from active editable direction passes");
+assert(/function getMessageTextTargets\(messageElement\) \{[\s\S]*?isInsideCanvasDocumentBlock\(messageElement\)[\s\S]*?return \[\]/.test(contentJs), "Canvas message roots must not produce message text targets");
+assert(/function getMessageTextTargets\(messageElement\) \{[\s\S]*?!isInsideCanvasDocumentBlock\(element\)[\s\S]*?containsCanvasDocumentBlock\(element\)/.test(contentJs), "Canvas descendants must be excluded from message text targets");
+assert(/function getTableDirectionTargets\(messageElement\) \{[\s\S]*?isInsideCanvasDocumentBlock\(messageElement\)[\s\S]*?return \[\][\s\S]*?!isInsideCanvasDocumentBlock\(tableElement\)/.test(contentJs), "Canvas tables must be excluded from table target discovery");
+assert(/function applyDirectionToTableCells\(tableElement\) \{[\s\S]*?isInsideCanvasDocumentBlock\(tableElement\)[\s\S]*?return/.test(contentJs), "Canvas tables must not receive table cell processing");
+assert(/function applyDirection\(element, kind, forcedDirection = null\) \{[\s\S]*?isInsideCanvasDocumentBlock\(element\)[\s\S]*?return forcedDirection \|\| selectedMode/.test(contentJs), "direction classes must not be applied inside Canvas");
+assert(/function applyInlineDirectionStyle\(element, direction\) \{[\s\S]*?isInsideCanvasDocumentBlock\(element\)[\s\S]*?return/.test(contentJs), "inline direction styles must not be applied inside Canvas");
+assert(/function scheduleApply\(root = document, options = \{\}\) \{[\s\S]*?isInsideCanvasDocumentBlock\(root\)[\s\S]*?return/.test(contentJs), "scheduled direction passes must ignore Canvas roots");
+assert(/new MutationObserver\(\(mutations\) => \{[\s\S]*?isInsideCanvasDocumentBlock\(target\)[\s\S]*?containsCanvasDocumentBlock\(element\)[\s\S]*?continue/.test(contentJs), "MutationObserver must ignore Canvas mutations and Canvas additions");
+
 for (const mode of ["auto", "rtl", "ltr"]) {
   assert(contentJs.includes(`"${mode}"`), `mode string missing: ${mode}`);
 }
@@ -73,7 +101,11 @@ for (const helper of [
   "enqueueMessageForDirection",
   "processDirectionQueue",
   "applyDirectionToVisibleMessages",
-  "applyInteractiveDirections"
+  "applyInteractiveDirections",
+  "isCanvasDocumentBlock",
+  "canvasDocumentContainerFor",
+  "isInsideCanvasDocumentBlock",
+  "containsCanvasDocumentBlock"
 ]) {
   assert(contentJs.includes(`function ${helper}`), `helper missing: ${helper}`);
 }
