@@ -73,7 +73,19 @@ for (const helper of [
   "enqueueMessageForDirection",
   "processDirectionQueue",
   "applyDirectionToVisibleMessages",
-  "applyInteractiveDirections"
+  "applyInteractiveDirections",
+  "isCanvasDocumentBlock",
+  "canvasDocumentContainerFor",
+  "isInsideCanvasDocumentBlock",
+  "getCanvasDocumentBlocks",
+  "getCanvasDocumentDirectionTargets",
+  "directionForCanvasDocumentBlock",
+  "applyDirectionToCanvasDocumentBlock",
+  "applyDirectionToCanvasDocuments",
+  "beginCanvasSelection",
+  "endCanvasSelectionSoon",
+  "isCanvasSelectionInProgressFor",
+  "installCanvasSelectionGuard"
 ]) {
   assert(contentJs.includes(`function ${helper}`), `helper missing: ${helper}`);
 }
@@ -86,6 +98,18 @@ assert(!contentJs.includes("textNode.replaceWith"), "rendered message text nodes
 assert(!/\.replaceWith\s*\(/.test(contentJs), "text nodes or elements must not be replaced via replaceWith");
 assert(!contentJs.includes("isolateInlineBidiRuns"), "JS inline bidi mutation pass must stay disabled");
 assert(!contentJs.includes("execCommand"), "must not use deprecated editing commands for direction changes");
+assert(contentJs.includes("CANVAS_DOCUMENT_CLASS"), "Canvas document direction class must exist");
+assert(contentJs.includes("canvasDocumentDirectionCache"), "Canvas document direction must use a cache");
+assert(contentJs.includes("const canvasSelectionInProgress = false") || contentJs.includes("let canvasSelectionInProgress = false"), "Canvas selection guard state must exist");
+assert(/function applyDirectionToCanvasDocumentBlock\(element\) \{[\s\S]*?directionForCanvasDocumentBlock[\s\S]*?applyDirection\(target, CANVAS_DOCUMENT_CLASS, direction\)[\s\S]*?applyInlineDirectionStyle\(target, direction\)/.test(contentJs), "Canvas document apply must be lightweight and idempotent");
+assert(/function directionForCanvasDocumentBlock\(element\) \{[\s\S]*?canvasDocumentDirectionCache[\s\S]*?detectDirectionFromText/.test(contentJs), "Canvas direction detection must be cached");
+assert(/function getMessageTextTargets\(messageElement\) \{[\s\S]*?getCanvasDocumentBlocks\(messageElement\)[\s\S]*?!isInKnownCanvas\(element\)/.test(contentJs), "normal message prose processing must skip Canvas document blocks");
+assert(/function getTableDirectionTargets\(messageElement\) \{[\s\S]*?getCanvasDocumentBlocks\(messageElement\)[\s\S]*?!canvasBlocks\.some\(\(block\) => block\.contains\(tableElement\)\)/.test(contentJs), "table scans must skip Canvas document blocks");
+assert(/const canvasRoot = canvasDocumentContainerFor\(target\);[\s\S]*?scheduleCanvasDocumentApply\(canvasRoot\);[\s\S]*?continue;/.test(contentJs), "MutationObserver must have a Canvas-specific skip/lightweight path");
+assert(/const canvasRoot = canvasDocumentContainerFor\(target\);[\s\S]*?isCanvasSelectionInProgressFor\(canvasRoot\)[\s\S]*?continue;/.test(contentJs), "Canvas selection mutations must not trigger full document processing");
+assert(/document\.addEventListener\("pointerdown", begin, true\)[\s\S]*document\.addEventListener\("selectionchange", endKeyboardSelection, true\)/.test(contentJs), "Canvas selection guard listeners must be installed");
+assert(contentJs.includes("installCanvasSelectionGuard();"), "Canvas selection guard must be installed at startup");
+assert(/function applyDirectionToMessages\(root = document\) \{[\s\S]*?applyDirectionToCanvasDocuments\(messageElement\)[\s\S]*?getMessageTextTargets\(messageElement\)/.test(contentJs), "visible messages must apply Canvas direction before normal prose processing");
 assert(contentJs.includes('document.addEventListener("focusin", handleComposerFocus, true)'), "focusin handler must apply edit composer direction immediately");
 assert(contentJs.includes("EDITABLE_DIRECTION_TARGET_SELECTOR"), "editable tree direction targets must be defined");
 assert(contentJs.includes("applyDirectionToActiveEditables(root)"), "full apply pass must scan active editables");
@@ -126,7 +150,7 @@ assert(contentJs.includes("const MAX_MESSAGES_PER_FRAME"), "message queue must u
 assert(contentJs.includes("MESSAGE_OBSERVER_ROOT_MARGIN"), "message observer must use a generous root margin");
 assert(!contentJs.includes("applyDirections(document, { fullReconcile: true })"), "startup/cleanup must not full-process all document messages");
 assert(!contentJs.includes("scheduleApply(document, { fullScan: true })"), "large subtree mutations must not force synchronous full document message processing");
-assert(new RegExp("installDebugInspector\\(\\);\\s*setupMessageIntersectionObserver\\(\\);\\s*applyInteractiveDirections\\(document\\);").test(contentJs), "startup must initialize lazy message observation and process interactive targets first");
+assert(new RegExp("installDebugInspector\\(\\);\\s*setupMessageIntersectionObserver\\(\\);\\s*installCanvasSelectionGuard\\(\\);\\s*applyInteractiveDirections\\(document\\);").test(contentJs), "startup must initialize lazy message observation, install Canvas guard, and process interactive targets first");
 assert(/function applyInteractiveDirections\(root = document\) \{[\s\S]*?applyDirectionToComposer\(root\)[\s\S]*?applyDirectionToActiveEditables\(root\)[\s\S]*?applyDirectionToFocusedResponseChangeMenus\(root\)[\s\S]*?ensureDirectionControl\(\)/.test(contentJs), "composer, edit, popup, and controls must remain immediate");
 assert(/function setMode\(mode, persist = true\) \{[\s\S]*?applyInteractiveDirections\(document\)[\s\S]*?applyDirectionToVisibleMessages\(document\)/.test(contentJs), "mode switches must update interactive and visible messages without processing all offscreen messages");
 assert(/if \(addedElementCount > 8 \|\| addedLargeSubtree\) \{[\s\S]*?applyInteractiveDirections\(document\)[\s\S]*?applyDirectionToVisibleMessages\(document\)[\s\S]*?continue;/.test(contentJs), "large subtree additions must process interactive and visible messages lazily");

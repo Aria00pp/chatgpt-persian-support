@@ -112,6 +112,23 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] Repeat the relevant checks on `https://chat.openai.com/` if that host is available for the account.
 
 
+## Canvas document preview checklist
+
+Use this checklist after changing Canvas/document preview direction logic:
+
+- [ ] Open a ChatGPT Canvas/document preview block inside an assistant response.
+- [ ] Select part of a long Persian paragraph inside the Canvas block.
+- [ ] Selection should be smooth without visible lag or jumping.
+- [ ] Copying the selected text should work normally.
+- [ ] Canvas text remains readable in Auto mode.
+- [ ] Canvas text remains readable in RTL mode.
+- [ ] Main composer still works.
+- [ ] Edit mode still works.
+- [ ] Response-change popup still works.
+- [ ] Tables still work with stable layout and per-cell direction.
+- [ ] Code blocks remain LTR.
+- [ ] Long chats remain responsive in Auto mode.
+
 ## Performance checklist
 
 Use this checklist after changing direction logic, especially in Auto mode:

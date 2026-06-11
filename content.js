@@ -9,6 +9,7 @@
   const MESSAGE_CLASS = "cgpt-dir-message";
   const TABLE_CLASS = "cgpt-dir-table";
   const TABLE_CELL_CLASS = "cgpt-dir-table-cell";
+  const CANVAS_DOCUMENT_CLASS = "cgpt-dir-canvas-document";
   const CONTROL_CLASS = "cgpt-dir-control";
   const ACTIVE_CONTROL_CLASS = "cgpt-dir-control-active";
   const LEGACY_CLASSES = ["cgpt-rtl-applied", "cgpt-rtl-composer", "cgpt-rtl-message"];
@@ -197,6 +198,27 @@
     "[data-radix-popper-content-wrapper]"
   ].join(",");
 
+  const CANVAS_DOCUMENT_ACTION_RE = /\b(edit|copy|download|expand|fullscreen|open|canvas|document)\b|ویرایش|کپی|رونوشت|دانلود|بارگیری|گسترش|تمام[\s-]*صفحه|سند/i;
+  const CANVAS_DOCUMENT_CONTENT_RE = /\b(canvas|document|artifact|preview)\b|سند|پیش[\s-]*نمایش|پيش[\s-]*نمايش/i;
+  const CANVAS_DOCUMENT_CONTAINER_SELECTOR = [
+    "[data-testid*='canvas' i]",
+    "[data-testid*='document' i]",
+    "[data-testid*='artifact' i]",
+    "[class*='canvas' i]",
+    "[class*='document' i]",
+    "[class*='artifact' i]"
+  ].join(",");
+  const CANVAS_DOCUMENT_CONTENT_SELECTOR = [
+    "article",
+    "section",
+    "[data-testid*='content' i]",
+    "[data-testid*='body' i]",
+    "[data-testid*='document' i]",
+    "[class*='content' i]",
+    "[class*='body' i]",
+    "[class*='document' i]"
+  ].join(",");
+
   const MESSAGE_OBSERVER_ROOT_MARGIN = "1200px 0px";
   const MESSAGE_OBSERVER_MARGIN_PX = 1200;
   const MAX_MESSAGES_PER_FRAME = 6;
@@ -208,6 +230,8 @@
   const elementTextSignatureCache = new WeakMap();
   const tableLayoutDirectionCache = new WeakMap();
   const tableCellDirectionCache = new WeakMap();
+  const canvasDocumentDirectionCache = new WeakMap();
+  const pendingCanvasDocumentRoots = new Set();
   let selectedMode = DEFAULT_MODE;
   let debugEnabled = false;
   let fullScanScheduled = false;
@@ -215,6 +239,11 @@
   let cleanupScheduled = false;
   let messageObserver = null;
   let directionQueueScheduled = false;
+  let canvasDocumentApplyScheduled = false;
+  let canvasSelectionInProgress = false;
+  let canvasSelectionBlock = null;
+  let canvasSelectionPointerDown = false;
+  let canvasSelectionEndTimer = 0;
   let perfStats = null;
   const messageDirectionQueue = new Set();
   const observedMessages = new WeakSet();
@@ -981,8 +1010,11 @@
   }
 
   function getMessageTextTargets(messageElement) {
+    const canvasBlocks = getCanvasDocumentBlocks(messageElement);
+    const isInKnownCanvas = (element) => canvasBlocks.some((block) => block.contains(element));
     const proseTargets = [...messageElement.querySelectorAll(MESSAGE_PROSE_SELECTOR)]
-      .filter((element) => !element.closest(`${CONTROL_AREA_SELECTOR}, ${COMPOSER_SELECTOR}`));
+      .filter((element) => !element.closest(`${CONTROL_AREA_SELECTOR}, ${COMPOSER_SELECTOR}`))
+      .filter((element) => !isInKnownCanvas(element));
 
     if (proseTargets.length > 0) {
       return topLevelTargets(proseTargets);
@@ -992,7 +1024,8 @@
       .filter((element) => (
         element.querySelector(MESSAGE_TEXT_BLOCK_SELECTOR) &&
         !element.querySelector(CONTROL_AREA_SELECTOR) &&
-        !element.querySelector(COMPOSER_SELECTOR)
+        !element.querySelector(COMPOSER_SELECTOR) &&
+        !isInKnownCanvas(element)
       ));
 
     if (messageIdTargets.length > 0) {
@@ -1000,7 +1033,8 @@
     }
 
     const textBlockTargets = [...messageElement.querySelectorAll(MESSAGE_TEXT_BLOCK_SELECTOR)]
-      .filter((element) => !element.closest(`${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, [role='toolbar'], [role='menu']`));
+      .filter((element) => !element.closest(`${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, [role='toolbar'], [role='menu']`))
+      .filter((element) => !isInKnownCanvas(element));
 
     if (textBlockTargets.length > 0) {
       return topLevelTargets(textBlockTargets);
@@ -1013,12 +1047,288 @@
     return [authorRoleTarget || messageElement];
   }
 
+  function canvasButtonSignalText(element) {
+    return [
+      element.getAttribute("aria-label"),
+      element.getAttribute("title"),
+      element.getAttribute("data-testid"),
+      element.textContent || ""
+    ].filter(Boolean).join(" ");
+  }
+
+  function hasCanvasDocumentToolbarSignals(container) {
+    if (!(container instanceof Element)) {
+      return false;
+    }
+
+    const controls = [...container.querySelectorAll("button, [role='button'], a[download]")].slice(0, 12);
+    let actionSignals = 0;
+    let hasEditSignal = false;
+    let hasPreviewSignal = CANVAS_DOCUMENT_CONTENT_RE.test(normalizedInputHint(container));
+
+    for (const control of controls) {
+      const signalText = canvasButtonSignalText(control);
+      const normalized = signalText.toLowerCase();
+      if (/\bedit\b|ویرایش/.test(normalized)) {
+        hasEditSignal = true;
+      }
+      if (CANVAS_DOCUMENT_ACTION_RE.test(signalText) || control.querySelector("svg")) {
+        actionSignals += 1;
+      }
+      if (CANVAS_DOCUMENT_CONTENT_RE.test(signalText)) {
+        hasPreviewSignal = true;
+      }
+    }
+
+    return hasEditSignal && actionSignals >= 2 && (hasPreviewSignal || (container.textContent || "").trim().length > 180);
+  }
+
+  function hasCanvasDocumentReadableBody(container) {
+    if (!(container instanceof Element)) {
+      return false;
+    }
+
+    if (container.matches(`${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, ${RESPONSE_CHANGE_MENU_SELECTOR}`) ||
+        container.closest(`nav, aside, header, footer, ${COMPOSER_CONTAINER_SELECTOR}, ${RESPONSE_CHANGE_MENU_SELECTOR}, [role='menu'], [role='listbox'], [data-testid*='settings' i], [data-testid*='model' i]`)) {
+      return false;
+    }
+
+    const text = (container.textContent || "").trim();
+    if (text.length < 120) {
+      return false;
+    }
+
+    return Boolean(container.querySelector("p, h1, h2, h3, h4, h5, h6, article, section"));
+  }
+
+  function isCanvasDocumentBlock(element) {
+    if (!(element instanceof Element) || !element.isConnected) {
+      return false;
+    }
+
+    const assistantMessage = element.closest("[data-message-author-role='assistant'], main article");
+    if (!assistantMessage || assistantMessage === element || element.matches(`${MESSAGE_PROSE_SELECTOR}, ${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, table`)) {
+      return false;
+    }
+
+    if (element.closest(`${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, ${RESPONSE_CHANGE_MENU_SELECTOR}, [role='menu'], [role='listbox'], nav, aside, header, footer, .${CONTROL_CLASS}`)) {
+      return false;
+    }
+
+    return hasCanvasDocumentReadableBody(element) && hasCanvasDocumentToolbarSignals(element);
+  }
+
+  function canvasDocumentContainerFor(element) {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    let current = element;
+    const message = element.closest("[data-message-author-role='assistant'], main article");
+    for (let depth = 0; current && current !== message && depth < 8; depth += 1) {
+      if (isCanvasDocumentBlock(current)) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+
+    return null;
+  }
+
+  function isInsideCanvasDocumentBlock(element) {
+    return Boolean(canvasDocumentContainerFor(element));
+  }
+
+  function canvasDocumentContentTargets(block) {
+    if (!(block instanceof Element)) {
+      return [];
+    }
+
+    const candidates = [...block.querySelectorAll(CANVAS_DOCUMENT_CONTENT_SELECTOR)]
+      .filter((candidate) => candidate !== block && block.contains(candidate))
+      .filter((candidate) => !candidate.closest(`${CONTROL_AREA_SELECTOR}, ${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, ${RESPONSE_CHANGE_MENU_SELECTOR}`))
+      .filter((candidate) => (candidate.textContent || "").trim().length >= 80 && !candidate.querySelector("button, [role='button']"));
+
+    const topLevel = topLevelTargets(candidates).slice(0, 3);
+    return topLevel.length > 0 ? topLevel : [block];
+  }
+
+  function getCanvasDocumentBlocks(root) {
+    const blocks = new Set();
+
+    if (root instanceof Element) {
+      const ownBlock = isCanvasDocumentBlock(root) ? root : canvasDocumentContainerFor(root);
+      if (ownBlock) {
+        blocks.add(ownBlock);
+      }
+    }
+
+    if (root && typeof root.querySelectorAll === "function") {
+      for (const hinted of root.querySelectorAll(CANVAS_DOCUMENT_CONTAINER_SELECTOR)) {
+        const block = isCanvasDocumentBlock(hinted) ? hinted : canvasDocumentContainerFor(hinted);
+        if (block) {
+          blocks.add(block);
+        }
+      }
+
+      for (const control of root.querySelectorAll("button, [role='button'], a[download]")) {
+        if (CANVAS_DOCUMENT_ACTION_RE.test(canvasButtonSignalText(control))) {
+          const block = canvasDocumentContainerFor(control);
+          if (block) {
+            blocks.add(block);
+          }
+        }
+      }
+    }
+
+    return [...blocks];
+  }
+
+  function getCanvasDocumentDirectionTargets(root) {
+    return getCanvasDocumentBlocks(root).flatMap(canvasDocumentContentTargets);
+  }
+
+  function directionForCanvasDocumentBlock(element) {
+    if (selectedMode === "rtl" || selectedMode === "ltr") {
+      return selectedMode;
+    }
+
+    const signature = textSignatureFor(element, 360);
+    const cached = canvasDocumentDirectionCache.get(element);
+    if (cached && cached.signature === signature) {
+      return cached.direction;
+    }
+
+    const direction = detectDirectionFromText(element.textContent || "", { sampleLimit: 360 });
+    canvasDocumentDirectionCache.set(element, { signature, direction });
+    return direction;
+  }
+
+  function applyDirectionToCanvasDocumentBlock(element) {
+    const block = canvasDocumentContainerFor(element) || (isCanvasDocumentBlock(element) ? element : null);
+    if (!block || isCanvasSelectionInProgressFor(block)) {
+      return;
+    }
+
+    for (const target of canvasDocumentContentTargets(block)) {
+      const direction = directionForCanvasDocumentBlock(target);
+      applyDirection(target, CANVAS_DOCUMENT_CLASS, direction);
+      applyInlineDirectionStyle(target, direction);
+    }
+  }
+
+  function applyDirectionToCanvasDocuments(root = document) {
+    for (const target of getCanvasDocumentDirectionTargets(root)) {
+      applyDirectionToCanvasDocumentBlock(target);
+    }
+  }
+
+  function scheduleCanvasDocumentApply(root) {
+    if (!(root instanceof Element) || !root.isConnected) {
+      return;
+    }
+
+    if (isCanvasSelectionInProgressFor(root)) {
+      pendingCanvasDocumentRoots.add(canvasDocumentContainerFor(root) || root);
+      return;
+    }
+
+    pendingCanvasDocumentRoots.add(canvasDocumentContainerFor(root) || root);
+    if (canvasDocumentApplyScheduled) {
+      return;
+    }
+
+    canvasDocumentApplyScheduled = true;
+    setTimeout(() => {
+      canvasDocumentApplyScheduled = false;
+      const roots = [...pendingCanvasDocumentRoots];
+      pendingCanvasDocumentRoots.clear();
+      for (const pendingRoot of roots) {
+        if (pendingRoot.isConnected && !isCanvasSelectionInProgressFor(pendingRoot)) {
+          applyDirectionToCanvasDocuments(pendingRoot);
+        }
+      }
+    }, 180);
+  }
+
+  function beginCanvasSelection(element) {
+    const block = canvasDocumentContainerFor(element);
+    if (!block) {
+      return;
+    }
+
+    canvasSelectionInProgress = true;
+    canvasSelectionBlock = block;
+    if (canvasSelectionEndTimer) {
+      clearTimeout(canvasSelectionEndTimer);
+      canvasSelectionEndTimer = 0;
+    }
+  }
+
+  function endCanvasSelectionSoon() {
+    if (!canvasSelectionInProgress) {
+      return;
+    }
+
+    if (canvasSelectionEndTimer) {
+      clearTimeout(canvasSelectionEndTimer);
+    }
+
+    canvasSelectionEndTimer = setTimeout(() => {
+      const block = canvasSelectionBlock;
+      canvasSelectionInProgress = false;
+      canvasSelectionBlock = null;
+      canvasSelectionEndTimer = 0;
+      if (block && block.isConnected) {
+        scheduleCanvasDocumentApply(block);
+      }
+    }, 220);
+  }
+
+  function isCanvasSelectionInProgressFor(element) {
+    if (!canvasSelectionInProgress || !(element instanceof Element)) {
+      return false;
+    }
+
+    const block = canvasDocumentContainerFor(element) || (isCanvasDocumentBlock(element) ? element : null);
+    return Boolean(block && canvasSelectionBlock && (block === canvasSelectionBlock || block.contains(canvasSelectionBlock) || canvasSelectionBlock.contains(block)));
+  }
+
+  function installCanvasSelectionGuard() {
+    const begin = (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target && isInsideCanvasDocumentBlock(target)) {
+        canvasSelectionPointerDown = true;
+        beginCanvasSelection(target);
+      }
+    };
+    const endPointerSelection = () => {
+      canvasSelectionPointerDown = false;
+      endCanvasSelectionSoon();
+    };
+    const endKeyboardSelection = () => {
+      if (!canvasSelectionPointerDown) {
+        endCanvasSelectionSoon();
+      }
+    };
+
+    document.addEventListener("pointerdown", begin, true);
+    document.addEventListener("mousedown", begin, true);
+    document.addEventListener("pointerup", endPointerSelection, true);
+    document.addEventListener("mouseup", endPointerSelection, true);
+    document.addEventListener("keyup", endKeyboardSelection, true);
+    document.addEventListener("selectionchange", endKeyboardSelection, true);
+    window.addEventListener("blur", endPointerSelection, true);
+  }
+
   function isTableElement(element) {
     return Boolean(element && element.matches && element.matches("table"));
   }
 
   function getTableDirectionTargets(messageElement) {
+    const canvasBlocks = getCanvasDocumentBlocks(messageElement);
     return [...messageElement.querySelectorAll("table")]
+      .filter((tableElement) => !canvasBlocks.some((block) => block.contains(tableElement)))
       .filter((tableElement) => shouldDirectionManageTable(tableElement));
   }
 
@@ -1573,6 +1883,8 @@
         perfStats.messages += 1;
       }
 
+      applyDirectionToCanvasDocuments(messageElement);
+
       for (const target of getMessageTextTargets(messageElement)) {
         applyDirection(target, MESSAGE_CLASS);
       }
@@ -1666,6 +1978,9 @@
 
     for (const message of document.querySelectorAll(MESSAGE_SELECTOR)) {
       if (isMessageElement(message)) {
+        for (const target of getCanvasDocumentDirectionTargets(message)) {
+          currentTargets.add(target);
+        }
         for (const target of getMessageTextTargets(message)) {
           currentTargets.add(target);
         }
@@ -1860,6 +2175,7 @@
       applyDirectionToComposer(root);
       applyDirectionToActiveEditables(root);
       applyDirectionToFocusedResponseChangeMenus(root);
+      applyDirectionToCanvasDocuments(root);
       if (options.includeMessages || root !== document) {
         applyDirectionToMessages(root);
       }
@@ -2064,6 +2380,14 @@
           continue;
         }
 
+        const canvasRoot = canvasDocumentContainerFor(target);
+        if (canvasRoot) {
+          if (!isCanvasSelectionInProgressFor(canvasRoot)) {
+            scheduleCanvasDocumentApply(canvasRoot);
+          }
+          continue;
+        }
+
         const addedElementCount = [...mutation.addedNodes].filter((node) => node instanceof Element).length;
         const addedLargeSubtree = [...mutation.addedNodes].some((node) => (
           node instanceof Element && node.querySelectorAll && node.querySelectorAll(`${MESSAGE_SELECTOR}, ${COMPOSER_SELECTOR}, table`).length > 4
@@ -2077,6 +2401,7 @@
         }
 
         const scopedRoot = target.closest("th, td")?.closest("table") ||
+          canvasDocumentContainerFor(target) ||
           target.closest(MESSAGE_SELECTOR) ||
           target.closest(COMPOSER_CONTAINER_SELECTOR) ||
           target.closest(COMPOSER_SELECTOR) ||
@@ -2134,6 +2459,7 @@
 
   installDebugInspector();
   setupMessageIntersectionObserver();
+  installCanvasSelectionGuard();
   applyInteractiveDirections(document);
   refreshObservedMessages(document);
   applyDirectionToVisibleMessages(document);
