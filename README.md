@@ -139,10 +139,20 @@ Canvas and document preview blocks are intentionally left native because ChatGPT
 
 ### Canvas detection debug checklist
 
-On a failing Canvas/document preview message, enable diagnostics from the page DevTools Console, select text inside Canvas, then run `document.dispatchEvent(new CustomEvent("cgpt-rtl-inspect-canvas"));` and verify:
+On a failing Canvas/document preview message, select text inside Canvas, then run this from the page DevTools Console:
 
-- [ ] `messageContainsCanvasDocument(message)` returns `true` for the assistant message/article that contains Canvas.
-- [ ] `canvasDocumentContainerFor(selectedCanvasTextElement)` returns a non-null Canvas/document preview container when called on an element inside selected Canvas text.
+```js
+document.documentElement.dataset.cgptRtlDebug = "1";
+document.dispatchEvent(new Event("cgpt-rtl-debug-enable"));
+document.dispatchEvent(new Event("cgpt-rtl-inspect-canvas"));
+JSON.parse(document.documentElement.dataset.cgptRtlCanvasDebugResult);
+```
+
+Verify:
+
+- [ ] `messageContainsCanvasDocument` is `true` for the assistant message/article that contains Canvas.
+- [ ] `hasCanvasContainer` is `true` for the selected Canvas text.
+- [ ] `selectedInsideCanvasDocumentBlock` is `true` for the selected Canvas text.
 - [ ] In Auto mode, `cgptAppliedCount` inside that Canvas-containing message is `0`, or any existing extension-applied state no longer affects the Canvas-containing message.
 - [ ] English Canvas content remains native/LTR.
 - [ ] Text selection inside Canvas has no lag.

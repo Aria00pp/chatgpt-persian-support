@@ -169,6 +169,9 @@ assert(contentJs.includes('document.addEventListener("cgpt-rtl-debug-disable", h
 assert(contentJs.includes('document.addEventListener("cgpt-rtl-inspect-active", handleDebugEvent)'), "manual inspect event listener must be installed");
 assert(contentJs.includes('document.addEventListener("cgpt-rtl-inspect-canvas", handleDebugEvent)'), "manual Canvas inspect event listener must be installed");
 assert(/function inspectCanvasDetectionContext\(\) \{[\s\S]*?isDebugEnabled\(\)[\s\S]*?selectedElementForDebug\(\)[\s\S]*?canvasDocumentContainerFor\(selectedElement\)[\s\S]*?messageContainsCanvasDocument\(message\)[\s\S]*?cgptAppliedCount/.test(contentJs), "Canvas debug inspector must report selected element, message detection, container, and applied count");
+assert(contentJs.includes("dataset.cgptRtlCanvasDebugResult = JSON.stringify(summary)"), "Canvas debug inspector must write a page-readable JSON summary dataset");
+assert(contentJs.includes('document.dispatchEvent(new CustomEvent("cgpt-rtl-canvas-debug-result", { detail: diagnostic }))'), "Canvas debug inspector must dispatch a page-visible result event");
+assert(/const summary = \{[\s\S]*?selectedMode[\s\S]*?messageContainsCanvasDocument: messageHasCanvas[\s\S]*?hasCanvasContainer: Boolean\(canvasContainer\)[\s\S]*?selectedInsideCanvasDocumentBlock: selectedInsideCanvas[\s\S]*?cgptAppliedCount: appliedElements\.length/.test(contentJs), "Canvas debug summary must include expected JSON-safe fields");
 assert(contentJs.includes('document.documentElement.dataset.cgptRtlDebug === "1"'), "diagnostics should also support documentElement dataset opt-in");
 assert(contentJs.includes('debugEditableContext(composer, "focusin")'), "focusin diagnostics must inspect prompt-like editables when enabled");
 assert(contentJs.includes('debugEditableContext(composer, "input")'), "input diagnostics must inspect prompt-like editables when enabled");

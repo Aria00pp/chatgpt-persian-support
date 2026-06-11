@@ -1153,18 +1153,28 @@
     const canvasContainer = selectedElement ? canvasDocumentContainerFor(selectedElement) : null;
     const appliedSelector = [`.${APPLIED_CLASS}`, ...LEGACY_CLASSES.map((name) => `.${name}`)].join(",");
     const appliedElements = message ? [...message.querySelectorAll(appliedSelector)] : [];
-    const diagnostic = {
+    const messageHasCanvas = messageContainsCanvasDocument(message);
+    const selectedInsideCanvas = selectedElement ? isInsideCanvasDocumentBlock(selectedElement) : false;
+    const summary = {
       selectedMode,
+      messageContainsCanvasDocument: messageHasCanvas,
+      hasCanvasContainer: Boolean(canvasContainer),
+      selectedInsideCanvasDocumentBlock: selectedInsideCanvas,
+      cgptAppliedCount: appliedElements.length
+    };
+    const diagnostic = {
+      ...summary,
       selectedElement: elementSummary(selectedElement),
       message: elementSummary(message),
       canvasContainer: elementSummary(canvasContainer),
-      messageContainsCanvasDocument: messageContainsCanvasDocument(message),
-      selectedInsideCanvasDocumentBlock: selectedElement ? isInsideCanvasDocumentBlock(selectedElement) : false,
-      cgptAppliedCount: appliedElements.length,
       cgptAppliedElements: appliedElements.slice(0, 12).map((element) => elementSummary(element, false)),
       messageTextPreview: previewText(message && message.textContent, 500)
     };
 
+    if (document.documentElement) {
+      document.documentElement.dataset.cgptRtlCanvasDebugResult = JSON.stringify(summary);
+    }
+    document.dispatchEvent(new CustomEvent("cgpt-rtl-canvas-debug-result", { detail: diagnostic }));
     console.info("[ChatGPT Persian Direction] Canvas detection debug", diagnostic);
   }
 
@@ -1176,6 +1186,7 @@
       debugEnabled = false;
       if (document.documentElement) {
         delete document.documentElement.dataset.cgptRtlDebug;
+        delete document.documentElement.dataset.cgptRtlCanvasDebugResult;
       }
       console.info("[ChatGPT Persian Direction] debug disabled");
     } else if (event.type === "cgpt-rtl-inspect-active") {
