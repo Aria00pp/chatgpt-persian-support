@@ -12,6 +12,7 @@ The extension applies the selected mode to messages already on the page and uses
 - **LTR** makes the composer and message prose left-to-right and left-aligned.
 - **Auto** detects the first strong Persian/Arabic/Hebrew or Latin character. Composer direction updates live, while each message independently receives its detected direction. Empty or ambiguous text defaults to RTL.
 - Formats user and assistant message prose, including existing and dynamically generated content, without forcing action bars or surrounding controls into a direction.
+- Keeps ChatGPT Canvas/document preview blocks native: the extension conservatively detects Canvas-like artifact/document-preview containers in assistant responses and skips their body, toolbar, controls, lists, paragraphs, tables, and code instead of applying direction attributes, classes, or inline direction styles.
 - Applies the selected direction to the main composer plus prompt-like edit and retry/regenerate input areas, including a full-document active-edit scan for ChatGPT edit boxes that appear outside the normal composer structure.
 - Uses CSS inline isolation for bold, italic, quote, link, and span content so mixed Persian-English prose is easier to read without mutating rendered message text or composer text.
 - Keeps code blocks, inline code, keyboard input, terminal-like output, math, and common syntax-highlighted/editor elements LTR and left-aligned; prose table layout follows RTL/LTR mode or header-detected Auto direction, while cells are detected independently so Persian, English, and mixed cells remain readable.
@@ -111,6 +112,23 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] ChatGPT controls remain visually normal after switching modes.
 - [ ] Repeat the relevant checks on `https://chat.openai.com/` if that host is available for the account.
 
+
+### Canvas/document preview checklist
+
+Canvas and document preview blocks are intentionally left native because ChatGPT already handles Persian and English direction inside them. When testing a chat that opens Canvas/document previews, verify:
+
+- [ ] Canvas/document preview opens normally.
+- [ ] Canvas scroll is smooth.
+- [ ] Selecting part of Canvas text is smooth.
+- [ ] Copying selected Canvas text works.
+- [ ] Persian and English inside Canvas remain native/correct.
+- [ ] Normal assistant messages still get direction handling.
+- [ ] Main composer still works.
+- [ ] Edit mode still works.
+- [ ] Response-change popup still works.
+- [ ] Tables outside Canvas still work.
+- [ ] Code blocks remain LTR.
+- [ ] Long chats remain responsive in Auto mode.
 
 ## Performance checklist
 

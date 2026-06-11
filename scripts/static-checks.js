@@ -24,6 +24,11 @@ for (const mode of ["auto", "rtl", "ltr"]) {
 }
 
 for (const helper of [
+  "isCanvasDocumentBlock",
+  "canvasDocumentContainerFor",
+  "isInsideCanvasDocumentBlock",
+  "collectElementsOutsideCanvas",
+  "elementsMatchingOutsideCanvas",
   "isPromptLikeEditable",
   "isMainComposer",
   "isInlineEditComposer",
@@ -77,6 +82,19 @@ for (const helper of [
 ]) {
   assert(contentJs.includes(`function ${helper}`), `helper missing: ${helper}`);
 }
+
+
+assert(contentJs.includes("CANVAS_DOCUMENT_SIGNAL_SELECTOR"), "Canvas detection selector must exist");
+assert(/function getMessageTextTargets\(messageElement\) \{[\s\S]*?isCanvasDocumentBlock\(messageElement\)[\s\S]*?collectElementsOutsideCanvas\(messageElement, MESSAGE_PROSE_SELECTOR\)[\s\S]*?!isInsideCanvasDocumentBlock\(element\)/.test(contentJs), "message text target collection must skip Canvas/document preview blocks");
+assert(/function getMessageTextTargets\(messageElement\) \{[\s\S]*?collectElementsOutsideCanvas\(messageElement, MESSAGE_TEXT_BLOCK_SELECTOR\)/.test(contentJs), "rendered text block collection must avoid scanning Canvas deeply");
+assert(/function getTableDirectionTargets\(messageElement\) \{[\s\S]*?isCanvasDocumentBlock\(messageElement\)[\s\S]*?collectElementsOutsideCanvas\(messageElement, "table"\)/.test(contentJs), "table target collection must skip Canvas/document preview blocks");
+assert(/function shouldDirectionManageTable\(tableElement\) \{[\s\S]*?isInsideCanvasDocumentBlock\(tableElement\)[\s\S]*?return false/.test(contentJs), "table management must reject Canvas tables");
+assert(/function applyDirectionToTableCells\(tableElement\) \{[\s\S]*?collectElementsOutsideCanvas\(tableElement, "th, td"\)[\s\S]*?isInsideCanvasDocumentBlock\(cellElement\)/.test(contentJs), "table cell processing must skip Canvas cells");
+assert(/new MutationObserver\(\(mutations\) => \{[\s\S]*?isCanvasDocumentBlock\(target\) \|\| isInsideCanvasDocumentBlock\(target\)[\s\S]*?continue;/.test(contentJs), "MutationObserver must have a Canvas skip path");
+assert(/function scheduleApply\(root = document, options = \{\}\) \{[\s\S]*?isCanvasDocumentBlock\(root\) \|\| isInsideCanvasDocumentBlock\(root\)[\s\S]*?return;/.test(contentJs), "scheduled direction passes must not run on Canvas roots");
+assert(!/selectionchange|selectstart|mouseup|mousedown/.test(contentJs), "Canvas-specific selection guards must not be installed");
+assert(/function applyDirection\(element, kind, forcedDirection = null\) \{[\s\S]*?isCanvasDocumentBlock\(element\) \|\| isInsideCanvasDocumentBlock\(element\)[\s\S]*?return forcedDirection \|\| selectedMode;/.test(contentJs), "direction classes must not be applied intentionally to Canvas content");
+assert(/function applyInlineDirectionStyle\(element, direction\) \{[\s\S]*?isCanvasDocumentBlock\(element\) \|\| isInsideCanvasDocumentBlock\(element\)[\s\S]*?return;/.test(contentJs), "inline direction styles must not be applied inside Canvas content");
 
 assert(contentJs.includes("chrome.storage.local"), "mode storage must continue using chrome.storage.local");
 assert(contentJs.includes("createDirectionControl"), "direction control must still exist");
@@ -141,7 +159,7 @@ assert(!contentJs.includes("function applyDirections(root = document, options = 
 assert(new RegExp("if \\(options\\.fullReconcile\\) \\{\\s*reconcileAppliedElements\\(\\);\\s*\\}").test(contentJs), "full reconciliation must be gated by applyDirections options");
 assert(/function directionForTableCell\(cellElement\) \{[\s\S]*?cachedDirectionForTableCell\(cellElement\)/.test(contentJs), "table cell direction must use cached detection per cell");
 assert(/function cachedDirectionForTableCell\(cellElement\) \{[\s\S]*?detectDirectionFromText\(cellElement\.textContent/.test(contentJs), "cached table cell helper must detect from cell text only after signature changes");
-assert(/function applyDirectionToTableCells\(tableElement\) \{[\s\S]*?querySelectorAll\("th, td"\)/.test(contentJs), "table direction must be applied independently to th and td cells");
+assert(/function applyDirectionToTableCells\(tableElement\) \{[\s\S]*?collectElementsOutsideCanvas\(tableElement, "th, td"\)/.test(contentJs), "table direction must be applied independently to th and td cells");
 assert(/function directionForTableLayout\(tableElement\) \{[\s\S]*?cachedDirectionForTableLayout\(tableElement\)/.test(contentJs), "table layout direction must use cached detection");
 assert(/function cachedDirectionForTableLayout\(tableElement\) \{[\s\S]*?tableHeaderText\(tableElement\)[\s\S]*?detectDirectionFromText/.test(contentJs), "table layout direction must be computed from headers/table text in Auto mode after signature changes");
 assert(contentJs.includes('applyStableDirectionToTable(tableElement, layoutDirection)'), "computed table layout direction must be applied to the table element");
