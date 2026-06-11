@@ -27,6 +27,10 @@ for (const helper of [
   "isCanvasDocumentBlock",
   "canvasDocumentContainerFor",
   "isInsideCanvasDocumentBlock",
+  "containsCanvasDocumentBlock",
+  "isCanvasDirectionBoundary",
+  "shouldSkipDirectionTargetBecauseItAffectsCanvas",
+  "cleanupCanvasDirectionAncestors",
   "collectElementsOutsideCanvas",
   "elementsMatchingOutsideCanvas",
   "isPromptLikeEditable",
@@ -85,16 +89,23 @@ for (const helper of [
 
 
 assert(contentJs.includes("CANVAS_DOCUMENT_SIGNAL_SELECTOR"), "Canvas detection selector must exist");
-assert(/function getMessageTextTargets\(messageElement\) \{[\s\S]*?isCanvasDocumentBlock\(messageElement\)[\s\S]*?collectElementsOutsideCanvas\(messageElement, MESSAGE_PROSE_SELECTOR\)[\s\S]*?!isInsideCanvasDocumentBlock\(element\)/.test(contentJs), "message text target collection must skip Canvas/document preview blocks");
-assert(/function getMessageTextTargets\(messageElement\) \{[\s\S]*?collectElementsOutsideCanvas\(messageElement, MESSAGE_TEXT_BLOCK_SELECTOR\)/.test(contentJs), "rendered text block collection must avoid scanning Canvas deeply");
-assert(/function getTableDirectionTargets\(messageElement\) \{[\s\S]*?isCanvasDocumentBlock\(messageElement\)[\s\S]*?collectElementsOutsideCanvas\(messageElement, "table"\)/.test(contentJs), "table target collection must skip Canvas/document preview blocks");
+assert(/function containsCanvasDocumentBlock\(element\) \{[\s\S]*?querySelectorAll\(CANVAS_DOCUMENT_SIGNAL_SELECTOR\)[\s\S]*?isCanvasDocumentBlock\(candidate\)/.test(contentJs), "Canvas-containing ancestors must be detectable without classifying unrelated UI");
+assert(/function isCanvasDirectionBoundary\(element\) \{[\s\S]*?containsCanvasDocumentBlock\(element\)/.test(contentJs), "Canvas direction boundary helper must include ancestors containing Canvas");
+assert(/function shouldSkipDirectionTargetBecauseItAffectsCanvas\(element\) \{\s*return isCanvasDirectionBoundary\(element\);\s*\}/.test(contentJs), "direction targets that could inherit into Canvas must be skipped");
+assert(/function getMessageTextTargets\(messageElement\) \{[\s\S]*?isCanvasDocumentBlock\(messageElement\)[\s\S]*?collectElementsOutsideCanvas\(messageElement, MESSAGE_PROSE_SELECTOR\)[\s\S]*?shouldSkipDirectionTargetBecauseItAffectsCanvas\(element\)/.test(contentJs), "message/prose containers that contain Canvas must not be returned as direction targets");
+assert(/const messageIdTargets = collectElementsOutsideCanvas\(messageElement, "\[data-message-id\]"\)[\s\S]*?!shouldSkipDirectionTargetBecauseItAffectsCanvas\(element\)/.test(contentJs), "data-message-id containers that contain Canvas must not be returned as direction targets");
+assert(/const fallbackTarget = authorRoleTarget \|\| messageElement;[\s\S]*?!shouldSkipDirectionTargetBecauseItAffectsCanvas\(fallbackTarget\)/.test(contentJs), "fallback message targets that contain Canvas must be rejected");
+assert(/function applyDirection\(element, kind, forcedDirection = null\) \{[\s\S]*?shouldSkipDirectionTargetBecauseItAffectsCanvas\(element\)[\s\S]*?return forcedDirection \|\| selectedMode;/.test(contentJs), "ancestor containers containing Canvas must not be direction-managed");
+assert(/function applyInlineDirectionStyle\(element, direction\) \{[\s\S]*?shouldSkipDirectionTargetBecauseItAffectsCanvas\(element\)[\s\S]*?return;/.test(contentJs), "inline direction styles must not be applied to Canvas or Canvas-containing ancestors");
+assert(/function cleanupCanvasDirectionAncestors\(root = document\) \{[\s\S]*?containsCanvasDocumentBlock\(element\)[\s\S]*?removeDirection\(element\)/.test(contentJs), "stale extension-applied direction must be removable from Canvas-containing ancestors");
+assert(/function removeDirection\(element\) \{[\s\S]*?isCanvasDocumentBlock\(element\) \|\| isInsideCanvasDocumentBlock\(element\)[\s\S]*?return;/.test(contentJs), "Canvas itself and Canvas children must remain untouched during cleanup");
+assert(/function clearExtensionInlineDirectionStyle\(element\) \{[\s\S]*?element\.style\.direction = ""[\s\S]*?element\.style\.textAlign = ""[\s\S]*?element\.style\.unicodeBidi = ""/.test(contentJs), "stale extension-owned inline direction styles must be clearable from Canvas-containing ancestors");
+assert(/function getTableDirectionTargets\(messageElement\) \{[\s\S]*?isCanvasDocumentBlock\(messageElement\)[\s\S]*?collectElementsOutsideCanvas\(messageElement, "table"\)/.test(contentJs), "table targets inside Canvas must be skipped");
 assert(/function shouldDirectionManageTable\(tableElement\) \{[\s\S]*?isInsideCanvasDocumentBlock\(tableElement\)[\s\S]*?return false/.test(contentJs), "table management must reject Canvas tables");
 assert(/function applyDirectionToTableCells\(tableElement\) \{[\s\S]*?collectElementsOutsideCanvas\(tableElement, "th, td"\)[\s\S]*?isInsideCanvasDocumentBlock\(cellElement\)/.test(contentJs), "table cell processing must skip Canvas cells");
-assert(/new MutationObserver\(\(mutations\) => \{[\s\S]*?isCanvasDocumentBlock\(target\) \|\| isInsideCanvasDocumentBlock\(target\)[\s\S]*?continue;/.test(contentJs), "MutationObserver must have a Canvas skip path");
+assert(/new MutationObserver\(\(mutations\) => \{[\s\S]*?isCanvasDocumentBlock\(target\) \|\| isInsideCanvasDocumentBlock\(target\)[\s\S]*?continue;/.test(contentJs), "MutationObserver must skip Canvas");
 assert(/function scheduleApply\(root = document, options = \{\}\) \{[\s\S]*?isCanvasDocumentBlock\(root\) \|\| isInsideCanvasDocumentBlock\(root\)[\s\S]*?return;/.test(contentJs), "scheduled direction passes must not run on Canvas roots");
 assert(!/selectionchange|selectstart|mouseup|mousedown/.test(contentJs), "Canvas-specific selection guards must not be installed");
-assert(/function applyDirection\(element, kind, forcedDirection = null\) \{[\s\S]*?isCanvasDocumentBlock\(element\) \|\| isInsideCanvasDocumentBlock\(element\)[\s\S]*?return forcedDirection \|\| selectedMode;/.test(contentJs), "direction classes must not be applied intentionally to Canvas content");
-assert(/function applyInlineDirectionStyle\(element, direction\) \{[\s\S]*?isCanvasDocumentBlock\(element\) \|\| isInsideCanvasDocumentBlock\(element\)[\s\S]*?return;/.test(contentJs), "inline direction styles must not be applied inside Canvas content");
 
 assert(contentJs.includes("chrome.storage.local"), "mode storage must continue using chrome.storage.local");
 assert(contentJs.includes("createDirectionControl"), "direction control must still exist");
@@ -144,7 +155,7 @@ assert(contentJs.includes("const MAX_MESSAGES_PER_FRAME"), "message queue must u
 assert(contentJs.includes("MESSAGE_OBSERVER_ROOT_MARGIN"), "message observer must use a generous root margin");
 assert(!contentJs.includes("applyDirections(document, { fullReconcile: true })"), "startup/cleanup must not full-process all document messages");
 assert(!contentJs.includes("scheduleApply(document, { fullScan: true })"), "large subtree mutations must not force synchronous full document message processing");
-assert(new RegExp("installDebugInspector\\(\\);\\s*setupMessageIntersectionObserver\\(\\);\\s*applyInteractiveDirections\\(document\\);").test(contentJs), "startup must initialize lazy message observation and process interactive targets first");
+assert(new RegExp("installDebugInspector\\(\\);\\s*setupMessageIntersectionObserver\\(\\);\\s*cleanupCanvasDirectionAncestors\\(document\\);\\s*applyInteractiveDirections\\(document\\);").test(contentJs), "startup must initialize lazy message observation, clean Canvas-containing ancestors, and process interactive targets first");
 assert(/function applyInteractiveDirections\(root = document\) \{[\s\S]*?applyDirectionToComposer\(root\)[\s\S]*?applyDirectionToActiveEditables\(root\)[\s\S]*?applyDirectionToFocusedResponseChangeMenus\(root\)[\s\S]*?ensureDirectionControl\(\)/.test(contentJs), "composer, edit, popup, and controls must remain immediate");
 assert(/function setMode\(mode, persist = true\) \{[\s\S]*?applyInteractiveDirections\(document\)[\s\S]*?applyDirectionToVisibleMessages\(document\)/.test(contentJs), "mode switches must update interactive and visible messages without processing all offscreen messages");
 assert(/if \(addedElementCount > 8 \|\| addedLargeSubtree\) \{[\s\S]*?applyInteractiveDirections\(document\)[\s\S]*?applyDirectionToVisibleMessages\(document\)[\s\S]*?continue;/.test(contentJs), "large subtree additions must process interactive and visible messages lazily");

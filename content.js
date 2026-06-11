@@ -351,6 +351,46 @@
     return Boolean(canvasDocumentContainerFor(element));
   }
 
+  function containsCanvasDocumentBlock(element) {
+    if (!(element instanceof Element)) {
+      return false;
+    }
+
+    for (const candidate of element.querySelectorAll(CANVAS_DOCUMENT_SIGNAL_SELECTOR)) {
+      if (candidate !== element && isCanvasDocumentBlock(candidate)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function isCanvasDirectionBoundary(element) {
+    return Boolean(element instanceof Element && (
+      isCanvasDocumentBlock(element) ||
+      isInsideCanvasDocumentBlock(element) ||
+      containsCanvasDocumentBlock(element)
+    ));
+  }
+
+  function shouldSkipDirectionTargetBecauseItAffectsCanvas(element) {
+    return isCanvasDirectionBoundary(element);
+  }
+
+  function cleanupCanvasDirectionAncestors(root = document) {
+    const appliedSelector = [`.${APPLIED_CLASS}`, ...LEGACY_CLASSES.map((name) => `.${name}`)].join(",");
+    const scope = root instanceof Element || root === document ? root : document;
+    for (const element of scope.querySelectorAll(appliedSelector)) {
+      if (isCanvasDocumentBlock(element) || isInsideCanvasDocumentBlock(element)) {
+        continue;
+      }
+
+      if (containsCanvasDocumentBlock(element)) {
+        removeDirection(element);
+      }
+    }
+  }
+
   function collectElementsOutsideCanvas(root, selector) {
     const matches = [];
     const add = (element) => {
@@ -1159,7 +1199,7 @@
     }
 
     const proseTargets = collectElementsOutsideCanvas(messageElement, MESSAGE_PROSE_SELECTOR)
-      .filter((element) => !element.closest(`${CONTROL_AREA_SELECTOR}, ${COMPOSER_SELECTOR}`) && !isInsideCanvasDocumentBlock(element));
+      .filter((element) => !element.closest(`${CONTROL_AREA_SELECTOR}, ${COMPOSER_SELECTOR}`) && !shouldSkipDirectionTargetBecauseItAffectsCanvas(element));
 
     if (proseTargets.length > 0) {
       return topLevelTargets(proseTargets);
@@ -1167,6 +1207,7 @@
 
     const messageIdTargets = collectElementsOutsideCanvas(messageElement, "[data-message-id]")
       .filter((element) => (
+        !shouldSkipDirectionTargetBecauseItAffectsCanvas(element) &&
         collectElementsOutsideCanvas(element, MESSAGE_TEXT_BLOCK_SELECTOR).length > 0 &&
         !collectElementsOutsideCanvas(element, CONTROL_AREA_SELECTOR).length &&
         !collectElementsOutsideCanvas(element, COMPOSER_SELECTOR).length
@@ -1177,7 +1218,7 @@
     }
 
     const textBlockTargets = collectElementsOutsideCanvas(messageElement, MESSAGE_TEXT_BLOCK_SELECTOR)
-      .filter((element) => !element.closest(`${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, [role='toolbar'], [role='menu']`) && !isInsideCanvasDocumentBlock(element));
+      .filter((element) => !element.closest(`${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, [role='toolbar'], [role='menu']`) && !shouldSkipDirectionTargetBecauseItAffectsCanvas(element));
 
     if (textBlockTargets.length > 0) {
       return topLevelTargets(textBlockTargets);
@@ -1188,7 +1229,7 @@
       : messageElement.querySelector("[data-message-author-role='user'], [data-message-author-role='assistant']");
 
     const fallbackTarget = authorRoleTarget || messageElement;
-    return fallbackTarget && !isCanvasDocumentBlock(fallbackTarget) && !isInsideCanvasDocumentBlock(fallbackTarget)
+    return fallbackTarget && !shouldSkipDirectionTargetBecauseItAffectsCanvas(fallbackTarget)
       ? [fallbackTarget]
       : [];
   }
@@ -1491,7 +1532,7 @@
   }
 
   function applyDirection(element, kind, forcedDirection = null) {
-    if (element instanceof Element && (isCanvasDocumentBlock(element) || isInsideCanvasDocumentBlock(element))) {
+    if (element instanceof Element && shouldSkipDirectionTargetBecauseItAffectsCanvas(element)) {
       return forcedDirection || selectedMode;
     }
 
@@ -1533,7 +1574,7 @@
   }
 
   function applyInlineDirectionStyle(element, direction) {
-    if (element instanceof Element && (isCanvasDocumentBlock(element) || isInsideCanvasDocumentBlock(element))) {
+    if (element instanceof Element && shouldSkipDirectionTargetBecauseItAffectsCanvas(element)) {
       return;
     }
 
@@ -1561,6 +1602,18 @@
     }
     if (element.style.unicodeBidi !== "isolate") {
       element.style.unicodeBidi = "isolate";
+    }
+  }
+
+  function clearExtensionInlineDirectionStyle(element) {
+    if (element.style.direction === "rtl" || element.style.direction === "ltr") {
+      element.style.direction = "";
+    }
+    if (element.style.textAlign === "right" || element.style.textAlign === "left") {
+      element.style.textAlign = "";
+    }
+    if (element.style.unicodeBidi === "isolate") {
+      element.style.unicodeBidi = "";
     }
   }
 
@@ -1745,7 +1798,11 @@
     const hadDirectionClass = element.classList.contains(APPLIED_CLASS) ||
       LEGACY_CLASSES.some((className) => element.classList.contains(className));
 
-    restoreInlineDirectionStyle(element);
+    if (originalInlineStyles.has(element)) {
+      restoreInlineDirectionStyle(element);
+    } else if (hadDirectionClass && containsCanvasDocumentBlock(element)) {
+      clearExtensionInlineDirectionStyle(element);
+    }
     element.classList.remove(APPLIED_CLASS, COMPOSER_CLASS, MESSAGE_CLASS, TABLE_CLASS, TABLE_CELL_CLASS, ...DIRECTION_CLASSES, ...LEGACY_CLASSES);
     if (hadDirectionClass && originalDirections.has(element)) {
       const originalDirection = originalDirections.get(element);
@@ -2097,6 +2154,7 @@
     cleanupScheduled = true;
     scheduleIdleWork(() => {
       cleanupScheduled = false;
+      cleanupCanvasDirectionAncestors(document);
       applyInteractiveDirections(document);
       refreshObservedMessages(document);
       applyDirectionToVisibleMessages(document);
@@ -2166,6 +2224,7 @@
 
     updateControlState();
     messageDirectionQueue.clear();
+    cleanupCanvasDirectionAncestors(document);
     applyInteractiveDirections(document);
     refreshObservedMessages(document);
     applyDirectionToVisibleMessages(document);
@@ -2373,6 +2432,7 @@
 
   installDebugInspector();
   setupMessageIntersectionObserver();
+  cleanupCanvasDirectionAncestors(document);
   applyInteractiveDirections(document);
   refreshObservedMessages(document);
   applyDirectionToVisibleMessages(document);

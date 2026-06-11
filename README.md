@@ -121,8 +121,11 @@ Canvas and document preview blocks are intentionally left native because ChatGPT
 - [ ] Canvas scroll is smooth.
 - [ ] Selecting part of Canvas text is smooth.
 - [ ] Copying selected Canvas text works.
+- [ ] Assistant response starts with Persian text, then includes an English Canvas/document preview: Canvas remains native LTR.
+- [ ] Assistant response starts with Persian text, then includes Persian Canvas: Canvas remains native/correct.
+- [ ] Auto mode does not force Canvas RTL because of surrounding Persian text.
 - [ ] Persian and English inside Canvas remain native/correct.
-- [ ] Normal assistant messages still get direction handling.
+- [ ] Normal non-Canvas Persian/English messages still get extension direction handling.
 - [ ] Main composer still works.
 - [ ] Edit mode still works.
 - [ ] Response-change popup still works.
