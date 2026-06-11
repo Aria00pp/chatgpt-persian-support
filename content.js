@@ -218,11 +218,23 @@
     "[class*='body' i]",
     "[class*='document' i]"
   ].join(",");
+  const CANVAS_DOCUMENT_TEXT_LEAF_SELECTOR = [
+    "p",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "li",
+    "blockquote"
+  ].join(",");
 
   const MESSAGE_OBSERVER_ROOT_MARGIN = "1200px 0px";
   const MESSAGE_OBSERVER_MARGIN_PX = 1200;
   const MAX_MESSAGES_PER_FRAME = 6;
-  const CANVAS_SELECTION_CLEAR_DELAY_MS = 1100;
+  const CANVAS_INTERACTION_LOCK_MS = 4000;
+  const CANVAS_APPLY_DEBOUNCE_MS = 600;
   const CANVAS_APPLY_IDLE_TIMEOUT_MS = 1500;
 
   const pendingRoots = new Set();
@@ -243,10 +255,8 @@
   let directionQueueScheduled = false;
   let canvasDocumentApplyScheduled = false;
   let canvasDocumentApplyTimer = 0;
-  let canvasSelectionInProgress = false;
-  let canvasSelectionBlock = null;
-  let canvasSelectionPointerDown = false;
-  let canvasSelectionEndTimer = 0;
+  let canvasInteractionLockedBlock = null;
+  let canvasInteractionLockedUntil = 0;
   let perfStats = null;
   const messageDirectionQueue = new Set();
   const observedMessages = new WeakSet();
@@ -1142,9 +1152,29 @@
     return Boolean(canvasDocumentContainerFor(element));
   }
 
+  function isCanvasTextLeafTarget(element) {
+    if (!(element instanceof Element) || !element.matches(CANVAS_DOCUMENT_TEXT_LEAF_SELECTOR)) {
+      return false;
+    }
+
+    if (element.closest(`${CONTROL_AREA_SELECTOR}, ${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, ${RESPONSE_CHANGE_MENU_SELECTOR}`)) {
+      return false;
+    }
+
+    const text = (element.textContent || "").trim();
+    return text.length >= 8;
+  }
+
   function canvasDocumentContentTargets(block) {
     if (!(block instanceof Element)) {
       return [];
+    }
+
+    if (selectedMode === "auto") {
+      const leaves = [...block.querySelectorAll(CANVAS_DOCUMENT_TEXT_LEAF_SELECTOR)]
+        .filter(isCanvasTextLeafTarget)
+        .slice(0, 60);
+      return leaves.length > 0 ? leaves : [];
     }
 
     const candidates = [...block.querySelectorAll(CANVAS_DOCUMENT_CONTENT_SELECTOR)]
@@ -1221,22 +1251,82 @@
   }
 
   function applyDirectionToCanvasDocuments(root = document) {
-    for (const target of getCanvasDocumentDirectionTargets(root)) {
-      applyDirectionToCanvasDocumentBlock(target);
+    for (const block of getCanvasDocumentBlocks(root)) {
+      applyDirectionToCanvasDocumentBlock(block);
     }
   }
 
+  function currentCanvasInteractionTime() {
+    return typeof performance !== "undefined" && typeof performance.now === "function"
+      ? performance.now()
+      : Date.now();
+  }
+
+  function clearExpiredCanvasInteractionLock() {
+    if (canvasInteractionLockedBlock && currentCanvasInteractionTime() > canvasInteractionLockedUntil) {
+      canvasInteractionLockedBlock = null;
+      canvasInteractionLockedUntil = 0;
+    }
+  }
+
+  function isCanvasInteractionLockedFor(element) {
+    clearExpiredCanvasInteractionLock();
+    if (!canvasInteractionLockedBlock || !(element instanceof Element)) {
+      return false;
+    }
+
+    if (canvasInteractionLockedBlock === element || canvasInteractionLockedBlock.contains(element) || element.contains(canvasInteractionLockedBlock)) {
+      return true;
+    }
+
+    const block = canvasDocumentContainerFor(element) || (isCanvasDocumentBlock(element) ? element : null);
+    return Boolean(block && (block === canvasInteractionLockedBlock || block.contains(canvasInteractionLockedBlock) || canvasInteractionLockedBlock.contains(block)));
+  }
+
+  function cancelPendingCanvasApplyTimer() {
+    if (canvasDocumentApplyTimer) {
+      clearTimeout(canvasDocumentApplyTimer);
+      canvasDocumentApplyTimer = 0;
+    }
+    canvasDocumentApplyScheduled = false;
+  }
+
+  function lockCanvasInteraction(element, duration = CANVAS_INTERACTION_LOCK_MS) {
+    const block = element instanceof Element
+      ? (canvasDocumentContainerFor(element) || (isCanvasDocumentBlock(element) ? element : null))
+      : canvasInteractionLockedBlock;
+    if (!block) {
+      return false;
+    }
+
+    canvasInteractionLockedBlock = block;
+    canvasInteractionLockedUntil = Math.max(canvasInteractionLockedUntil, currentCanvasInteractionTime() + duration);
+    pendingCanvasDocumentRoots.add(block);
+    cancelPendingCanvasApplyTimer();
+    return true;
+  }
+
+  function extendCanvasInteractionLock(duration = CANVAS_INTERACTION_LOCK_MS) {
+    if (!canvasInteractionLockedBlock) {
+      return false;
+    }
+
+    canvasInteractionLockedUntil = Math.max(canvasInteractionLockedUntil, currentCanvasInteractionTime() + duration);
+    cancelPendingCanvasApplyTimer();
+    return true;
+  }
+
   function flushPendingCanvasDocumentAppliesWhenIdle() {
-    if (hasActiveSelectionInsideCanvas()) {
-      extendCanvasSelectionGuard();
-      clearCanvasSelectionGuardWhenSafe();
+    clearExpiredCanvasInteractionLock();
+    if (canvasInteractionLockedBlock) {
+      scheduleCanvasDocumentApply(canvasInteractionLockedBlock);
       return;
     }
 
     const roots = [...pendingCanvasDocumentRoots];
     pendingCanvasDocumentRoots.clear();
     for (const pendingRoot of roots) {
-      if (pendingRoot.isConnected && !isCanvasSelectionInProgressFor(pendingRoot)) {
+      if (pendingRoot.isConnected && !isCanvasInteractionLockedFor(pendingRoot)) {
         applyDirectionToCanvasDocuments(pendingRoot);
       } else if (pendingRoot.isConnected) {
         pendingCanvasDocumentRoots.add(pendingRoot);
@@ -1254,15 +1344,12 @@
     }
 
     pendingCanvasDocumentRoots.add(canvasDocumentContainerFor(root) || root);
-    if (isCanvasSelectionInProgressFor(root) || hasActiveSelectionInsideCanvas(root)) {
-      clearCanvasSelectionGuardWhenSafe();
-      return;
-    }
-
     if (canvasDocumentApplyScheduled) {
       return;
     }
 
+    const locked = isCanvasInteractionLockedFor(root);
+    const lockDelay = locked ? Math.max(0, canvasInteractionLockedUntil - currentCanvasInteractionTime()) : 0;
     canvasDocumentApplyScheduled = true;
     canvasDocumentApplyTimer = setTimeout(() => {
       canvasDocumentApplyTimer = 0;
@@ -1270,186 +1357,66 @@
         canvasDocumentApplyScheduled = false;
         flushPendingCanvasDocumentAppliesWhenIdle();
       }, CANVAS_APPLY_IDLE_TIMEOUT_MS);
-    }, CANVAS_SELECTION_CLEAR_DELAY_MS);
-  }
-
-  function elementForSelectionNode(node) {
-    if (node instanceof Element) {
-      return node;
-    }
-
-    return node && node.parentElement ? node.parentElement : null;
-  }
-
-  function currentCanvasSelectionBlock() {
-    const selection = window.getSelection ? window.getSelection() : null;
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-      return null;
-    }
-
-    for (let index = 0; index < selection.rangeCount; index += 1) {
-      const range = selection.getRangeAt(index);
-      if (!range || range.collapsed) {
-        continue;
-      }
-
-      const nodes = [
-        range.commonAncestorContainer,
-        range.startContainer,
-        range.endContainer,
-        selection.anchorNode,
-        selection.focusNode
-      ];
-
-      for (const node of nodes) {
-        const element = elementForSelectionNode(node);
-        const block = element ? canvasDocumentContainerFor(element) : null;
-        if (block) {
-          return block;
-        }
-      }
-    }
-
-    return null;
-  }
-
-  function hasActiveSelectionInsideCanvas(element = null) {
-    const selectedBlock = currentCanvasSelectionBlock();
-    if (!selectedBlock) {
-      return false;
-    }
-
-    if (!(element instanceof Element)) {
-      return true;
-    }
-
-    const block = canvasDocumentContainerFor(element) || (isCanvasDocumentBlock(element) ? element : null);
-    return Boolean(block && (block === selectedBlock || block.contains(selectedBlock) || selectedBlock.contains(block)));
-  }
-
-  function extendCanvasSelectionGuard(element = null) {
-    const block = element instanceof Element
-      ? (canvasDocumentContainerFor(element) || currentCanvasSelectionBlock())
-      : currentCanvasSelectionBlock();
-    if (!block) {
-      return false;
-    }
-
-    canvasSelectionInProgress = true;
-    canvasSelectionBlock = block;
-    if (canvasSelectionEndTimer) {
-      clearTimeout(canvasSelectionEndTimer);
-      canvasSelectionEndTimer = 0;
-    }
-    if (canvasDocumentApplyTimer) {
-      clearTimeout(canvasDocumentApplyTimer);
-      canvasDocumentApplyTimer = 0;
-      canvasDocumentApplyScheduled = false;
-    }
-    return true;
+    }, lockDelay + CANVAS_APPLY_DEBOUNCE_MS);
   }
 
   function beginCanvasSelection(element) {
-    extendCanvasSelectionGuard(element);
-  }
-
-  function clearCanvasSelectionGuardWhenSafe(delay = CANVAS_SELECTION_CLEAR_DELAY_MS) {
-    if (!canvasSelectionInProgress && !hasActiveSelectionInsideCanvas()) {
-      return;
-    }
-
-    if (canvasSelectionEndTimer) {
-      clearTimeout(canvasSelectionEndTimer);
-    }
-
-    canvasSelectionEndTimer = setTimeout(() => {
-      const activeBlock = currentCanvasSelectionBlock();
-      if (activeBlock) {
-        canvasSelectionInProgress = true;
-        canvasSelectionBlock = activeBlock;
-        clearCanvasSelectionGuardWhenSafe(delay);
-        return;
-      }
-
-      const block = canvasSelectionBlock;
-      canvasSelectionInProgress = false;
-      canvasSelectionBlock = null;
-      canvasSelectionPointerDown = false;
-      canvasSelectionEndTimer = 0;
-      if (block && block.isConnected) {
-        scheduleCanvasDocumentApply(block);
-      }
-    }, delay);
+    lockCanvasInteraction(element);
   }
 
   function endCanvasSelectionSoon() {
-    clearCanvasSelectionGuardWhenSafe();
+    extendCanvasInteractionLock();
+    if (canvasInteractionLockedBlock) {
+      scheduleCanvasDocumentApply(canvasInteractionLockedBlock);
+    }
   }
 
   function isCanvasSelectionInProgressFor(element) {
-    if (!(element instanceof Element)) {
-      return false;
-    }
-
-    if (hasActiveSelectionInsideCanvas(element)) {
-      return true;
-    }
-
-    if (!canvasSelectionInProgress) {
-      return false;
-    }
-
-    const block = canvasDocumentContainerFor(element) || (isCanvasDocumentBlock(element) ? element : null);
-    return Boolean(block && canvasSelectionBlock && (block === canvasSelectionBlock || block.contains(canvasSelectionBlock) || canvasSelectionBlock.contains(block)));
+    return isCanvasInteractionLockedFor(element);
   }
 
   function installCanvasSelectionGuard() {
     const begin = (event) => {
       const target = event.target instanceof Element ? event.target : null;
       if (target && isInsideCanvasDocumentBlock(target)) {
-        canvasSelectionPointerDown = true;
         beginCanvasSelection(target);
       }
     };
-    const maintainSelectionGuard = () => {
-      if (extendCanvasSelectionGuard()) {
-        clearCanvasSelectionGuardWhenSafe();
-      }
-    };
-    const endPointerSelection = () => {
-      canvasSelectionPointerDown = false;
-      maintainSelectionGuard();
-      clearCanvasSelectionGuardWhenSafe();
-    };
-    const endKeyboardSelection = () => {
-      if (!canvasSelectionPointerDown) {
-        maintainSelectionGuard();
-        clearCanvasSelectionGuardWhenSafe();
+    const extendLock = () => {
+      if (extendCanvasInteractionLock() && canvasInteractionLockedBlock) {
+        scheduleCanvasDocumentApply(canvasInteractionLockedBlock);
       }
     };
     const guardCopy = (event) => {
       const target = event.target instanceof Element ? event.target : null;
-      if ((target && isInsideCanvasDocumentBlock(target)) || hasActiveSelectionInsideCanvas()) {
-        extendCanvasSelectionGuard(target);
-        clearCanvasSelectionGuardWhenSafe(CANVAS_SELECTION_CLEAR_DELAY_MS + 400);
+      if ((target && isInsideCanvasDocumentBlock(target)) || canvasInteractionLockedBlock) {
+        lockCanvasInteraction(target || canvasInteractionLockedBlock, CANVAS_INTERACTION_LOCK_MS);
+        if (canvasInteractionLockedBlock) {
+          scheduleCanvasDocumentApply(canvasInteractionLockedBlock);
+        }
       }
     };
     const guardCopyShortcut = (event) => {
-      if ((event.ctrlKey || event.metaKey) && event.code === "KeyC" && hasActiveSelectionInsideCanvas()) {
-        guardCopy(event);
+      if ((event.ctrlKey || event.metaKey) && event.code === "KeyC" && canvasInteractionLockedBlock) {
+        extendCanvasInteractionLock();
+        scheduleCanvasDocumentApply(canvasInteractionLockedBlock);
+      }
+    };
+    const cheapSelectionChange = () => {
+      if (canvasInteractionLockedBlock) {
+        extendCanvasInteractionLock(500);
       }
     };
 
     document.addEventListener("pointerdown", begin, true);
     document.addEventListener("mousedown", begin, true);
-    document.addEventListener("pointerup", endPointerSelection, true);
-    document.addEventListener("mouseup", endPointerSelection, true);
-    document.addEventListener("keyup", endKeyboardSelection, true);
-    document.addEventListener("selectionchange", maintainSelectionGuard, true);
+    document.addEventListener("pointerup", extendLock, true);
+    document.addEventListener("mouseup", extendLock, true);
+    document.addEventListener("selectionchange", cheapSelectionChange, true);
     document.addEventListener("beforecopy", guardCopy, true);
     document.addEventListener("copy", guardCopy, true);
     document.addEventListener("keydown", guardCopyShortcut, true);
-    window.addEventListener("blur", endPointerSelection, true);
+    window.addEventListener("blur", extendLock, true);
   }
 
   function isTableElement(element) {
@@ -2546,6 +2513,9 @@
   }
 
   function handleRouteChange() {
+    canvasInteractionLockedBlock = null;
+    canvasInteractionLockedUntil = 0;
+    cancelPendingCanvasApplyTimer();
     messageDirectionQueue.clear();
     applyInteractiveDirections(document);
     refreshObservedMessages(document);
