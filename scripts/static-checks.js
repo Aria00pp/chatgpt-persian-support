@@ -82,6 +82,11 @@ for (const helper of [
   "directionForCanvasDocumentBlock",
   "applyDirectionToCanvasDocumentBlock",
   "applyDirectionToCanvasDocuments",
+  "isRenderedTextDirectionBlock",
+  "getRenderedTextDirectionBlocks",
+  "getMessageTextDirectionBlocks",
+  "getCanvasTextDirectionBlocks",
+  "cleanupStaleRenderedDirectionContainers",
   "isCanvasTextLeafTarget",
   "currentCanvasInteractionTime",
   "isCanvasInteractionLockedFor",
@@ -116,13 +121,17 @@ assert(/function getTableDirectionTargets\(messageElement\) \{[\s\S]*?getCanvasD
 assert(/const canvasRoot = canvasDocumentContainerFor\(target\);[\s\S]*?scheduleCanvasDocumentApply\(canvasRoot\);[\s\S]*?continue;/.test(contentJs), "MutationObserver must have a Canvas-specific skip/lightweight path");
 assert(/const canvasRoot = canvasDocumentContainerFor\(target\);[\s\S]*?isCanvasSelectionInProgressFor\(canvasRoot\)[\s\S]*?continue;/.test(contentJs), "Canvas selection mutations must not trigger full document processing");
 assert(/function scheduleCanvasDocumentApply\(root\) \{[\s\S]*?isCanvasInteractionLockedFor\(root\)[\s\S]*?lockDelay[\s\S]*?canvasInteractionLockedUntil[\s\S]*?flushPendingCanvasDocumentAppliesWhenIdle/.test(contentJs), "Canvas apply scheduler must defer flushing while locked");
-assert(/function canvasDocumentContentTargets\(block\) \{[\s\S]*?selectedMode === "auto"[\s\S]*?CANVAS_DOCUMENT_TEXT_LEAF_SELECTOR[\s\S]*?return leaves/.test(contentJs), "Auto mode must not force a large Canvas container direction");
+assert(/function canvasDocumentContentTargets\(block\) \{[\s\S]*?selectedMode === "auto"[\s\S]*?return getCanvasTextDirectionBlocks\(block\)/.test(contentJs), "Auto mode must not force a large Canvas container direction");
+assert(/function getMessageTextTargets\(messageElement\) \{[\s\S]*?selectedMode === "auto"[\s\S]*?getMessageTextDirectionBlocks\(messageElement\)/.test(contentJs), "Auto mode must use rendered text block targeting for messages");
+assert(/function getRenderedTextDirectionBlocks\(root\) \{[\s\S]*?isRenderedTextDirectionBlock/.test(contentJs), "rendered block-level direction helper must exist");
+assert(/function isRenderedTextDirectionBlock\(element\) \{[\s\S]*?div, span[\s\S]*?hasDirectVisibleText/.test(contentJs), "Canvas/message Auto mode must support non-semantic text blocks");
+assert(/function cleanupStaleRenderedDirectionContainers\(root, currentTargets\) \{[\s\S]*?removeDirection\(element\)/.test(contentJs), "stale extension-applied direction can be removed from old large containers");
 assert(/function directionForCanvasDocumentBlock\(element\) \{[\s\S]*?selectedMode === "rtl" \|\| selectedMode === "ltr"[\s\S]*?detectDirectionFromText\(element\.textContent/.test(contentJs), "English-dominant Canvas leaf text remains LTR by cached Auto detection");
 assert(/document\.addEventListener\("pointerdown", begin, true\)[\s\S]*document\.addEventListener\("selectionchange", cheapSelectionChange, true\)/.test(contentJs), "selectionchange must stay O(1) for Canvas interaction locks");
 assert(/document\.addEventListener\("beforecopy", guardCopy, true\)[\s\S]*document\.addEventListener\("copy", guardCopy, true\)[\s\S]*document\.addEventListener\("keydown", guardCopyShortcut, true\)/.test(contentJs), "copy-specific Canvas interaction lock must be installed");
 assert(/const begin = \(event\) => \{[\s\S]*?beginCanvasSelection\(target\)[\s\S]*?const extendLock = \(\) => \{[\s\S]*?extendCanvasInteractionLock\(\)/.test(contentJs), "pointer and copy events must extend the Canvas lock");
 assert(contentJs.includes("installCanvasSelectionGuard();"), "Canvas selection guard must be installed at startup");
-assert(/function applyDirectionToMessages\(root = document\) \{[\s\S]*?applyDirectionToCanvasDocuments\(messageElement\)[\s\S]*?getMessageTextTargets\(messageElement\)/.test(contentJs), "visible messages must apply Canvas direction before normal prose processing");
+assert(/function applyDirectionToMessages\(root = document\) \{[\s\S]*?getMessageTextTargets\(messageElement\)[\s\S]*?cleanupStaleRenderedDirectionContainers[\s\S]*?applyDirectionToCanvasDocuments\(messageElement\)[\s\S]*?for \(const target of messageTargets\)/.test(contentJs), "visible messages must collect block targets, clean stale containers, and apply Canvas/message direction separately");
 assert(contentJs.includes('document.addEventListener("focusin", handleComposerFocus, true)'), "focusin handler must apply edit composer direction immediately");
 assert(contentJs.includes("EDITABLE_DIRECTION_TARGET_SELECTOR"), "editable tree direction targets must be defined");
 assert(contentJs.includes("applyDirectionToActiveEditables(root)"), "full apply pass must scan active editables");

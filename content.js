@@ -229,6 +229,15 @@
     "li",
     "blockquote"
   ].join(",");
+  const RENDERED_TEXT_DIRECTION_BLOCK_SELECTOR = [
+    MESSAGE_TEXT_BLOCK_SELECTOR,
+    "li",
+    "figcaption",
+    "[data-testid*='paragraph' i]",
+    "[class*='paragraph' i]",
+    "div",
+    "span"
+  ].join(",");
 
   const MESSAGE_OBSERVER_ROOT_MARGIN = "1200px 0px";
   const MESSAGE_OBSERVER_MARGIN_PX = 1200;
@@ -1022,7 +1031,110 @@
     ));
   }
 
+  function hasDirectVisibleText(element) {
+    for (const node of element.childNodes) {
+      if (node.nodeType === Node.TEXT_NODE && node.textContent && node.textContent.trim().length > 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function isRenderedTextDirectionBlock(element) {
+    if (!(element instanceof Element) || !isVisibleConnected(element)) {
+      return false;
+    }
+
+    if (element.closest(`${CONTROL_AREA_SELECTOR}, ${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, ${RESPONSE_CHANGE_MENU_SELECTOR}, nav, aside, header, footer, [role='menu'], [role='listbox']`)) {
+      return false;
+    }
+
+    const text = (element.textContent || "").trim();
+    if (text.length < 8) {
+      return false;
+    }
+
+    const childTextBlocks = element.querySelectorAll(MESSAGE_TEXT_BLOCK_SELECTOR + ", li, figcaption");
+    if (childTextBlocks.length > 0) {
+      return false;
+    }
+
+    if (element.matches("li, figcaption, [data-testid*='paragraph' i], [class*='paragraph' i]")) {
+      return true;
+    }
+
+    if (element.matches("p, h1, h2, h3, h4, h5, h6")) {
+      return true;
+    }
+
+    if (element.matches("blockquote")) {
+      return hasDirectVisibleText(element);
+    }
+
+    if (!element.matches("div, span")) {
+      return false;
+    }
+
+    if (!hasDirectVisibleText(element)) {
+      return false;
+    }
+
+    if (element.querySelector("button, [role='button'], table, pre, code, math, textarea")) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function getRenderedTextDirectionBlocks(root) {
+    if (!(root instanceof Element)) {
+      return [];
+    }
+
+    const candidates = [];
+    if (isRenderedTextDirectionBlock(root)) {
+      candidates.push(root);
+    }
+
+    if (typeof root.querySelectorAll === "function") {
+      for (const element of root.querySelectorAll(RENDERED_TEXT_DIRECTION_BLOCK_SELECTOR)) {
+        if (isRenderedTextDirectionBlock(element)) {
+          candidates.push(element);
+        }
+      }
+    }
+
+    return topLevelTargets(candidates);
+  }
+
+  function getMessageTextDirectionBlocks(messageElement) {
+    const canvasBlocks = getCanvasDocumentBlocks(messageElement);
+    const isInKnownCanvas = (element) => canvasBlocks.some((block) => block.contains(element));
+    const roots = [...messageElement.querySelectorAll(MESSAGE_PROSE_SELECTOR)]
+      .filter((element) => !element.closest(`${CONTROL_AREA_SELECTOR}, ${COMPOSER_SELECTOR}`))
+      .filter((element) => !isInKnownCanvas(element));
+    const searchRoots = roots.length > 0 ? roots : [messageElement];
+    const blocks = [];
+
+    for (const root of searchRoots) {
+      for (const block of getRenderedTextDirectionBlocks(root)) {
+        if (!isInKnownCanvas(block) && !blocks.includes(block)) {
+          blocks.push(block);
+        }
+      }
+    }
+
+    return blocks;
+  }
+
   function getMessageTextTargets(messageElement) {
+    if (selectedMode === "auto") {
+      const blocks = getMessageTextDirectionBlocks(messageElement);
+      if (blocks.length > 0) {
+        return blocks;
+      }
+    }
+
     const canvasBlocks = getCanvasDocumentBlocks(messageElement);
     const isInKnownCanvas = (element) => canvasBlocks.some((block) => block.contains(element));
     const proseTargets = [...messageElement.querySelectorAll(MESSAGE_PROSE_SELECTOR)]
@@ -1153,16 +1265,20 @@
   }
 
   function isCanvasTextLeafTarget(element) {
-    if (!(element instanceof Element) || !element.matches(CANVAS_DOCUMENT_TEXT_LEAF_SELECTOR)) {
-      return false;
+    return isRenderedTextDirectionBlock(element) &&
+      isInsideCanvasDocumentBlock(element) &&
+      !element.closest(CONTROL_AREA_SELECTOR);
+  }
+
+  function getCanvasTextDirectionBlocks(block) {
+    if (!(block instanceof Element)) {
+      return [];
     }
 
-    if (element.closest(`${CONTROL_AREA_SELECTOR}, ${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, ${RESPONSE_CHANGE_MENU_SELECTOR}`)) {
-      return false;
-    }
-
-    const text = (element.textContent || "").trim();
-    return text.length >= 8;
+    return getRenderedTextDirectionBlocks(block)
+      .filter((target) => block.contains(target))
+      .filter((target) => !target.closest(`${CONTROL_AREA_SELECTOR}, ${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, ${RESPONSE_CHANGE_MENU_SELECTOR}`))
+      .slice(0, 80);
   }
 
   function canvasDocumentContentTargets(block) {
@@ -1171,10 +1287,7 @@
     }
 
     if (selectedMode === "auto") {
-      const leaves = [...block.querySelectorAll(CANVAS_DOCUMENT_TEXT_LEAF_SELECTOR)]
-        .filter(isCanvasTextLeafTarget)
-        .slice(0, 60);
-      return leaves.length > 0 ? leaves : [];
+      return getCanvasTextDirectionBlocks(block);
     }
 
     const candidates = [...block.querySelectorAll(CANVAS_DOCUMENT_CONTENT_SELECTOR)]
@@ -1243,7 +1356,9 @@
       return;
     }
 
-    for (const target of canvasDocumentContentTargets(block)) {
+    const targets = canvasDocumentContentTargets(block);
+    cleanupStaleRenderedDirectionContainers(block, targets);
+    for (const target of targets) {
       const direction = directionForCanvasDocumentBlock(target);
       applyDirection(target, CANVAS_DOCUMENT_CLASS, direction);
       applyInlineDirectionStyle(target, direction);
@@ -1253,6 +1368,25 @@
   function applyDirectionToCanvasDocuments(root = document) {
     for (const block of getCanvasDocumentBlocks(root)) {
       applyDirectionToCanvasDocumentBlock(block);
+    }
+  }
+
+  function cleanupStaleRenderedDirectionContainers(root, currentTargets) {
+    if (selectedMode !== "auto" || !(root instanceof Element)) {
+      return;
+    }
+
+    const targetSet = new Set(currentTargets);
+    const selector = `.${MESSAGE_CLASS}, .${CANVAS_DOCUMENT_CLASS}`;
+    for (const element of elementsMatching(root, selector, true)) {
+      if (targetSet.has(element) || isCanvasInteractionLockedFor(element)) {
+        continue;
+      }
+
+      const ownsCurrentTarget = currentTargets.some((target) => element.contains(target));
+      if (ownsCurrentTarget) {
+        removeDirection(element);
+      }
     }
   }
 
@@ -1981,9 +2115,12 @@
         perfStats.messages += 1;
       }
 
+      const messageTargets = getMessageTextTargets(messageElement);
+      const canvasTargets = getCanvasDocumentDirectionTargets(messageElement);
+      cleanupStaleRenderedDirectionContainers(messageElement, [...messageTargets, ...canvasTargets]);
       applyDirectionToCanvasDocuments(messageElement);
 
-      for (const target of getMessageTextTargets(messageElement)) {
+      for (const target of messageTargets) {
         applyDirection(target, MESSAGE_CLASS);
       }
 
