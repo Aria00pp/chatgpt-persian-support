@@ -99,6 +99,7 @@ assert(!/\.replaceWith\s*\(/.test(contentJs), "text nodes or elements must not b
 assert(!contentJs.includes("isolateInlineBidiRuns"), "JS inline bidi mutation pass must stay disabled");
 assert(!contentJs.includes("execCommand"), "must not use deprecated editing commands for direction changes");
 assert(contentJs.includes("CANVAS_DOCUMENT_CLASS"), "Canvas document direction class must exist");
+assert(/function removeDirection\(element\) \{[\s\S]*?classList\.remove\([\s\S]*?CANVAS_DOCUMENT_CLASS/.test(contentJs), "removeDirection must remove Canvas document direction class");
 assert(contentJs.includes("canvasDocumentDirectionCache"), "Canvas document direction must use a cache");
 assert(contentJs.includes("const canvasSelectionInProgress = false") || contentJs.includes("let canvasSelectionInProgress = false"), "Canvas selection guard state must exist");
 assert(/function applyDirectionToCanvasDocumentBlock\(element\) \{[\s\S]*?directionForCanvasDocumentBlock[\s\S]*?applyDirection\(target, CANVAS_DOCUMENT_CLASS, direction\)[\s\S]*?applyInlineDirectionStyle\(target, direction\)/.test(contentJs), "Canvas document apply must be lightweight and idempotent");

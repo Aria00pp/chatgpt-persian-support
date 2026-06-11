@@ -1850,7 +1850,7 @@
       LEGACY_CLASSES.some((className) => element.classList.contains(className));
 
     restoreInlineDirectionStyle(element);
-    element.classList.remove(APPLIED_CLASS, COMPOSER_CLASS, MESSAGE_CLASS, TABLE_CLASS, TABLE_CELL_CLASS, ...DIRECTION_CLASSES, ...LEGACY_CLASSES);
+    element.classList.remove(APPLIED_CLASS, COMPOSER_CLASS, MESSAGE_CLASS, TABLE_CLASS, TABLE_CELL_CLASS, CANVAS_DOCUMENT_CLASS, ...DIRECTION_CLASSES, ...LEGACY_CLASSES);
     if (hadDirectionClass && originalDirections.has(element)) {
       const originalDirection = originalDirections.get(element);
       if (originalDirection === null) {
