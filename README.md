@@ -139,7 +139,7 @@ Canvas and document preview blocks are intentionally left native because ChatGPT
 
 ### Canvas detection debug checklist
 
-On a failing Canvas/document preview message, enable the content-script test hooks or use the debug console context, then verify:
+On a failing Canvas/document preview message, enable diagnostics from the page DevTools Console, select text inside Canvas, then run `document.dispatchEvent(new CustomEvent("cgpt-rtl-inspect-canvas"));` and verify:
 
 - [ ] `messageContainsCanvasDocument(message)` returns `true` for the assistant message/article that contains Canvas.
 - [ ] `canvasDocumentContainerFor(selectedCanvasTextElement)` returns a non-null Canvas/document preview container when called on an element inside selected Canvas text.

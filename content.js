@@ -316,7 +316,7 @@
     return Boolean(element instanceof Element && (
       element.matches(MESSAGE_PROSE_SELECTOR) ||
       element.matches(MESSAGE_TEXT_BLOCK_SELECTOR) ||
-      element.closest(MESSAGE_PROSE_SELECTOR) ||
+      element.matches(`${TECHNICAL_SELECTOR}, table`) ||
       element.closest(`${COMPOSER_SELECTOR}, ${RESPONSE_CHANGE_MENU_SELECTOR}, nav, aside, header, footer, [role='dialog'], [aria-modal='true'], [role='menu'], [role='listbox']`)
     ));
   }
@@ -1131,6 +1131,43 @@
     debugEditableContext(editable, "manual", true);
   }
 
+  function selectedElementForDebug() {
+    const selection = window.getSelection ? window.getSelection() : null;
+    const node = selection && selection.rangeCount > 0 ? selection.anchorNode : null;
+    if (node instanceof Element) {
+      return node;
+    }
+    if (node && node.parentElement) {
+      return node.parentElement;
+    }
+    return document.activeElement instanceof Element ? document.activeElement : null;
+  }
+
+  function inspectCanvasDetectionContext() {
+    if (!isDebugEnabled()) {
+      return;
+    }
+
+    const selectedElement = selectedElementForDebug();
+    const message = selectedElement ? selectedElement.closest(MESSAGE_SELECTOR) : null;
+    const canvasContainer = selectedElement ? canvasDocumentContainerFor(selectedElement) : null;
+    const appliedSelector = [`.${APPLIED_CLASS}`, ...LEGACY_CLASSES.map((name) => `.${name}`)].join(",");
+    const appliedElements = message ? [...message.querySelectorAll(appliedSelector)] : [];
+    const diagnostic = {
+      selectedMode,
+      selectedElement: elementSummary(selectedElement),
+      message: elementSummary(message),
+      canvasContainer: elementSummary(canvasContainer),
+      messageContainsCanvasDocument: messageContainsCanvasDocument(message),
+      selectedInsideCanvasDocumentBlock: selectedElement ? isInsideCanvasDocumentBlock(selectedElement) : false,
+      cgptAppliedCount: appliedElements.length,
+      cgptAppliedElements: appliedElements.slice(0, 12).map((element) => elementSummary(element, false)),
+      messageTextPreview: previewText(message && message.textContent, 500)
+    };
+
+    console.info("[ChatGPT Persian Direction] Canvas detection debug", diagnostic);
+  }
+
   function handleDebugEvent(event) {
     if (event.type === "cgpt-rtl-debug-enable") {
       debugEnabled = true;
@@ -1143,6 +1180,8 @@
       console.info("[ChatGPT Persian Direction] debug disabled");
     } else if (event.type === "cgpt-rtl-inspect-active") {
       inspectActiveEditableContext();
+    } else if (event.type === "cgpt-rtl-inspect-canvas") {
+      inspectCanvasDetectionContext();
     }
   }
 
@@ -1150,6 +1189,7 @@
     document.addEventListener("cgpt-rtl-debug-enable", handleDebugEvent);
     document.addEventListener("cgpt-rtl-debug-disable", handleDebugEvent);
     document.addEventListener("cgpt-rtl-inspect-active", handleDebugEvent);
+    document.addEventListener("cgpt-rtl-inspect-canvas", handleDebugEvent);
   }
   function getComposerContainer(element) {
     if (isExcludedUiArea(element)) {
@@ -2353,10 +2393,57 @@
     });
   }
 
-  function saveMode() {
-    if (chrome.storage && chrome.storage.local) {
-      chrome.storage.local.set({ [STORAGE_KEY]: selectedMode });
+  function safeStorageArea() {
+    try {
+      const chromeApi = globalThis.chrome;
+      if (!chromeApi || !chromeApi.runtime || !chromeApi.runtime.id || !chromeApi.storage || !chromeApi.storage.local) {
+        return null;
+      }
+      return chromeApi.storage.local;
+    } catch (_error) {
+      return null;
     }
+  }
+
+  function safeStorageSet(value) {
+    const storage = safeStorageArea();
+    if (!storage) {
+      return;
+    }
+
+    try {
+      storage.set({ [STORAGE_KEY]: value }, () => {
+        const runtime = globalThis.chrome && globalThis.chrome.runtime;
+        void (runtime && runtime.lastError);
+      });
+    } catch (_error) {
+      // Ignore stale extension contexts after reload/update.
+    }
+  }
+
+  function safeStorageGet(key, callback) {
+    const storage = safeStorageArea();
+    if (!storage) {
+      callback(null);
+      return;
+    }
+
+    try {
+      storage.get(key, (stored) => {
+        const runtime = globalThis.chrome && globalThis.chrome.runtime;
+        if (runtime && runtime.lastError) {
+          callback(null);
+          return;
+        }
+        callback(stored || null);
+      });
+    } catch (_error) {
+      callback(null);
+    }
+  }
+
+  function saveMode() {
+    safeStorageSet(selectedMode);
   }
 
   function setMode(mode, persist = true) {
@@ -2379,13 +2466,7 @@
   }
 
   function loadMode() {
-    if (!chrome.storage || !chrome.storage.local) {
-      applyInteractiveDirections(document);
-      applyDirectionToVisibleMessages(document);
-      return;
-    }
-
-    chrome.storage.local.get(STORAGE_KEY, (stored) => {
+    safeStorageGet(STORAGE_KEY, (stored) => {
       const storedMode = stored && stored[STORAGE_KEY];
       setMode(MODES.includes(storedMode) ? storedMode : DEFAULT_MODE, false);
     });

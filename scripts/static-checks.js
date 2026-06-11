@@ -65,6 +65,9 @@ for (const helper of [
   "applyDirectionLikeKeyboardShortcut",
   "isEditableDirectionExcluded",
   "debugEditableContext",
+  "inspectCanvasDetectionContext",
+  "safeStorageGet",
+  "safeStorageSet",
   "installDebugInspector",
   "handleComposerFocus",
   "isTableElement",
@@ -95,7 +98,8 @@ for (const helper of [
 assert(contentJs.includes("CANVAS_DOCUMENT_SIGNAL_SELECTOR"), "Canvas detection selector must exist");
 assert(contentJs.includes("function isStructuralCanvasDocumentBlock"), "Canvas detection must include structural detection");
 assert(/function isCanvasDocumentBlock\(element\) \{[\s\S]*?CANVAS_DOCUMENT_STRONG_SIGNAL_RE[\s\S]*?isStructuralCanvasDocumentBlock\(element\)[\s\S]*?CANVAS_DOCUMENT_WEAK_SIGNAL_RE/.test(contentJs), "Canvas detection must not rely only on string selectors");
-assert(/function isStructuralCanvasDocumentBlock\(element\) \{[\s\S]*?isInAssistantResponseArea\(element\)[\s\S]*?isNormalMessageProseElement\(element\)[\s\S]*?structuralCanvasControlScore\(element\)[\s\S]*?hasDocumentLikeStructure\(element\)/.test(contentJs), "structural Canvas detection must require assistant scope, non-prose target, controls, and document-like structure");
+assert(/function isStructuralCanvasDocumentBlock\(element\) \{[\s\S]*?isInAssistantResponseArea\(element\)[\s\S]*?isNormalMessageProseElement\(element\)[\s\S]*?structuralCanvasControlScore\(element\)[\s\S]*?hasDocumentLikeStructure\(element\)/.test(contentJs), "structural Canvas detection must require assistant scope, safe target, controls, and document-like structure");
+assert(!contentJs.includes("element.closest(MESSAGE_PROSE_SELECTOR) ||"), "prose ancestry alone must not reject structural Canvas candidates");
 assert(/function structuralCanvasCandidatesFor\(messageElement\) \{[\s\S]*?messageElement\.children[\s\S]*?querySelectorAll\("section, article/.test(contentJs), "message-level Canvas detection must inspect limited structural candidates");
 assert(/function containsCanvasDocumentBlock\(element\) \{[\s\S]*?querySelectorAll\(CANVAS_DOCUMENT_SIGNAL_SELECTOR\)[\s\S]*?structuralCanvasCandidatesFor\(element\)/.test(contentJs), "Canvas-containing ancestors must be detectable structurally");
 assert(/function messageContainsCanvasDocument\(messageElement\) \{[\s\S]*?containsCanvasDocumentBlock\(messageElement\)[\s\S]*?querySelector\(CANVAS_DOCUMENT_SIGNAL_SELECTOR\)[\s\S]*?structuralCanvasCandidatesFor\(messageElement\)[\s\S]*?hasCanvasDocumentToolbarSignals\(messageElement\)/.test(contentJs), "message-level Canvas helper must check structural candidates, not only selector strings");
@@ -128,7 +132,12 @@ assert(/function scheduleApply\(root = document, options = \{\}\) \{[\s\S]*?shou
 assert(!/selectionchange|selectstart|addEventListener\(["']copy["']|pointerdown|pointerup|pointermove|mouseup|mousedown/.test(contentJs), "Canvas selection/copy/pointer guards must not be installed");
 assert(!contentJs.includes('document.addEventListener("selectionchange"'), "selectionchange handler must not be added");
 
-assert(contentJs.includes("chrome.storage.local"), "mode storage must continue using chrome.storage.local");
+assert(contentJs.includes("chromeApi.storage.local"), "mode storage must continue using chrome.storage.local through a safe wrapper");
+assert(/function safeStorageArea\(\) \{[\s\S]*?globalThis\.chrome[\s\S]*?chromeApi\.runtime\.id[\s\S]*?chromeApi\.storage\.local/.test(contentJs), "safe storage wrapper must check global chrome, runtime id, and storage.local");
+assert(/function safeStorageSet\(value\) \{[\s\S]*?try \{[\s\S]*?runtime\.lastError[\s\S]*?catch \(_error\)/.test(contentJs), "safe storage set must catch stale context errors and read lastError");
+assert(/function safeStorageGet\(key, callback\) \{[\s\S]*?callback\(null\)[\s\S]*?try \{[\s\S]*?runtime\.lastError[\s\S]*?catch \(_error\)/.test(contentJs), "safe storage get must fall back and catch stale context errors");
+assert(/function saveMode\(\) \{\s*safeStorageSet\(selectedMode\);\s*\}/.test(contentJs), "saveMode must use safeStorageSet");
+assert(/function loadMode\(\) \{\s*safeStorageGet\(STORAGE_KEY/.test(contentJs), "loadMode must use safeStorageGet");
 assert(contentJs.includes("createDirectionControl"), "direction control must still exist");
 assert(!contentJs.includes('document.createElement("bdi")'), "rendered message text must not be wrapped in bdi");
 assert(!contentJs.includes("document.createElement('bdi')"), "rendered message text must not be wrapped in bdi");
@@ -158,6 +167,8 @@ assert(contentJs.includes("let debugEnabled = false"), "diagnostic mode must be 
 assert(contentJs.includes('document.addEventListener("cgpt-rtl-debug-enable", handleDebugEvent)'), "debug enable event listener must be installed");
 assert(contentJs.includes('document.addEventListener("cgpt-rtl-debug-disable", handleDebugEvent)'), "debug disable event listener must be installed");
 assert(contentJs.includes('document.addEventListener("cgpt-rtl-inspect-active", handleDebugEvent)'), "manual inspect event listener must be installed");
+assert(contentJs.includes('document.addEventListener("cgpt-rtl-inspect-canvas", handleDebugEvent)'), "manual Canvas inspect event listener must be installed");
+assert(/function inspectCanvasDetectionContext\(\) \{[\s\S]*?isDebugEnabled\(\)[\s\S]*?selectedElementForDebug\(\)[\s\S]*?canvasDocumentContainerFor\(selectedElement\)[\s\S]*?messageContainsCanvasDocument\(message\)[\s\S]*?cgptAppliedCount/.test(contentJs), "Canvas debug inspector must report selected element, message detection, container, and applied count");
 assert(contentJs.includes('document.documentElement.dataset.cgptRtlDebug === "1"'), "diagnostics should also support documentElement dataset opt-in");
 assert(contentJs.includes('debugEditableContext(composer, "focusin")'), "focusin diagnostics must inspect prompt-like editables when enabled");
 assert(contentJs.includes('debugEditableContext(composer, "input")'), "input diagnostics must inspect prompt-like editables when enabled");
