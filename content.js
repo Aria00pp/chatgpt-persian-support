@@ -238,6 +238,7 @@
   let perfStats = null;
   const messageDirectionQueue = new Set();
   const observedMessages = new WeakSet();
+  const structuralCanvasDocumentBlocks = new WeakSet();
 
   function elementsMatching(root, selector, includeClosest = false) {
     const matches = new Set();
@@ -310,6 +311,119 @@
     return matchedControls >= 3 || (hasEditControl && hasDocumentActionControl);
   }
 
+
+  function isNormalMessageProseElement(element) {
+    return Boolean(element instanceof Element && (
+      element.matches(MESSAGE_PROSE_SELECTOR) ||
+      element.matches(MESSAGE_TEXT_BLOCK_SELECTOR) ||
+      element.closest(MESSAGE_PROSE_SELECTOR) ||
+      element.closest(`${COMPOSER_SELECTOR}, ${RESPONSE_CHANGE_MENU_SELECTOR}, nav, aside, header, footer, [role='dialog'], [aria-modal='true'], [role='menu'], [role='listbox']`)
+    ));
+  }
+
+  function hasDocumentLikeScrollableRegion(element) {
+    const candidates = [element, ...[...element.querySelectorAll("[class*='overflow' i], [style*='overflow'], [role='document'], [role='region']")].slice(0, 12)];
+    return candidates.some((candidate) => (
+      candidate instanceof Element &&
+      (candidate.getAttribute("role") === "document" || candidate.getAttribute("role") === "region" || candidate.scrollHeight > candidate.clientHeight + 80)
+    ));
+  }
+
+  function hasDocumentLikeStructure(element) {
+    const textBlocks = element.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, code, table").length;
+    const panelHint = /\b(overflow|rounded|border|shadow|preview|document|editor|viewer|modal|sheet|panel|card)\b/i.test(elementHintText(element));
+    return textBlocks >= 2 || panelHint || hasDocumentLikeScrollableRegion(element);
+  }
+
+  function structuralCanvasControlScore(element) {
+    const controls = [...element.querySelectorAll("[role='toolbar'], button, [role='button'], a, [aria-label], [title]")].slice(0, 30);
+    let labeledControls = 0;
+    let iconControls = 0;
+
+    for (const control of controls) {
+      const hint = [elementHintText(control), control.textContent || ""].join(" ");
+      if (CANVAS_DOCUMENT_TOOLBAR_CONTROL_RE.test(hint)) {
+        labeledControls += 1;
+      }
+      if (control.matches("button, [role='button'], a") && (control.querySelector("svg") || previewText(control.textContent, 20).length <= 2)) {
+        iconControls += 1;
+      }
+    }
+
+    return labeledControls * 2 + Math.min(iconControls, 3);
+  }
+
+  function isStructuralCanvasDocumentBlock(element) {
+    if (element instanceof Element && structuralCanvasDocumentBlocks.has(element)) {
+      return true;
+    }
+
+    if (!(element instanceof Element) || !isInAssistantResponseArea(element)) {
+      return false;
+    }
+
+    const message = element.closest(MESSAGE_SELECTOR);
+    if (!message || element === message || isNormalMessageProseElement(element)) {
+      return false;
+    }
+
+    const text = previewText(element.textContent, 1200);
+    if (text.length < 80) {
+      return false;
+    }
+
+    const controlScore = structuralCanvasControlScore(element);
+    if (controlScore < 2) {
+      return false;
+    }
+
+    let score = controlScore;
+    if (hasDocumentLikeStructure(element)) {
+      score += 2;
+    }
+    if (element.children.length >= 2) {
+      score += 1;
+    }
+    if (!element.closest(MESSAGE_PROSE_SELECTOR)) {
+      score += 1;
+    }
+
+    const detected = score >= 4;
+    if (detected) {
+      structuralCanvasDocumentBlocks.add(element);
+    }
+    return detected;
+  }
+
+  function structuralCanvasCandidatesFor(messageElement) {
+    if (!(messageElement instanceof Element)) {
+      return [];
+    }
+
+    const candidates = [];
+    const add = (element) => {
+      if (element instanceof Element && element !== messageElement && !candidates.includes(element)) {
+        candidates.push(element);
+      }
+    };
+
+    for (const child of [...messageElement.children].slice(0, 16)) {
+      add(child);
+      for (const grandchild of [...child.children].slice(0, 12)) {
+        add(grandchild);
+        for (const greatGrandchild of [...grandchild.children].slice(0, 8)) {
+          add(greatGrandchild);
+        }
+      }
+    }
+
+    for (const element of [...messageElement.querySelectorAll("section, article, [role='region'], [role='document'], [role='group'], [class*='overflow' i], [class*='rounded' i], [class*='border' i], [class*='shadow' i]")].slice(0, 48)) {
+      add(element);
+    }
+
+    return candidates.slice(0, 80);
+  }
+
   function isCanvasDocumentBlock(element) {
     if (!(element instanceof Element) || !isInAssistantResponseArea(element)) {
       return false;
@@ -317,6 +431,10 @@
 
     const hint = elementHintText(element);
     if (CANVAS_DOCUMENT_STRONG_SIGNAL_RE.test(hint)) {
+      return true;
+    }
+
+    if (isStructuralCanvasDocumentBlock(element)) {
       return true;
     }
 
@@ -364,6 +482,12 @@
       }
     }
 
+    for (const candidate of structuralCanvasCandidatesFor(element)) {
+      if (isStructuralCanvasDocumentBlock(candidate)) {
+        return true;
+      }
+    }
+
     return false;
   }
 
@@ -391,6 +515,12 @@
     const signaledDescendant = messageElement.querySelector(CANVAS_DOCUMENT_SIGNAL_SELECTOR);
     if (signaledDescendant && !signaledDescendant.closest("nav, aside, header, footer, [role='menu'], [role='listbox']")) {
       return true;
+    }
+
+    for (const candidate of structuralCanvasCandidatesFor(messageElement)) {
+      if (isStructuralCanvasDocumentBlock(candidate)) {
+        return true;
+      }
     }
 
     return hasCanvasDocumentToolbarSignals(messageElement);
@@ -2457,7 +2587,10 @@
       isMessageNearViewport,
       enqueueMessageForDirection,
       processDirectionQueue,
-      detectDirectionFromText
+      detectDirectionFromText,
+      messageContainsCanvasDocument,
+      canvasDocumentContainerFor,
+      isCanvasDocumentBlock
     });
     return;
   }

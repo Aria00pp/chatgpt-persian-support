@@ -28,6 +28,8 @@ for (const helper of [
   "canvasDocumentContainerFor",
   "isInsideCanvasDocumentBlock",
   "containsCanvasDocumentBlock",
+  "isStructuralCanvasDocumentBlock",
+  "structuralCanvasCandidatesFor",
   "isCanvasDirectionBoundary",
   "shouldSkipDirectionTargetBecauseItAffectsCanvas",
   "messageContainsCanvasDocument",
@@ -91,8 +93,13 @@ for (const helper of [
 
 
 assert(contentJs.includes("CANVAS_DOCUMENT_SIGNAL_SELECTOR"), "Canvas detection selector must exist");
-assert(/function containsCanvasDocumentBlock\(element\) \{[\s\S]*?querySelectorAll\(CANVAS_DOCUMENT_SIGNAL_SELECTOR\)[\s\S]*?isCanvasDocumentBlock\(candidate\)/.test(contentJs), "Canvas-containing ancestors must be detectable without classifying unrelated UI");
-assert(/function messageContainsCanvasDocument\(messageElement\) \{[\s\S]*?containsCanvasDocumentBlock\(messageElement\)[\s\S]*?querySelector\(CANVAS_DOCUMENT_SIGNAL_SELECTOR\)[\s\S]*?hasCanvasDocumentToolbarSignals\(messageElement\)/.test(contentJs), "message-level Canvas helper must cheaply check Canvas signals and toolbar controls");
+assert(contentJs.includes("function isStructuralCanvasDocumentBlock"), "Canvas detection must include structural detection");
+assert(/function isCanvasDocumentBlock\(element\) \{[\s\S]*?CANVAS_DOCUMENT_STRONG_SIGNAL_RE[\s\S]*?isStructuralCanvasDocumentBlock\(element\)[\s\S]*?CANVAS_DOCUMENT_WEAK_SIGNAL_RE/.test(contentJs), "Canvas detection must not rely only on string selectors");
+assert(/function isStructuralCanvasDocumentBlock\(element\) \{[\s\S]*?isInAssistantResponseArea\(element\)[\s\S]*?isNormalMessageProseElement\(element\)[\s\S]*?structuralCanvasControlScore\(element\)[\s\S]*?hasDocumentLikeStructure\(element\)/.test(contentJs), "structural Canvas detection must require assistant scope, non-prose target, controls, and document-like structure");
+assert(/function structuralCanvasCandidatesFor\(messageElement\) \{[\s\S]*?messageElement\.children[\s\S]*?querySelectorAll\("section, article/.test(contentJs), "message-level Canvas detection must inspect limited structural candidates");
+assert(/function containsCanvasDocumentBlock\(element\) \{[\s\S]*?querySelectorAll\(CANVAS_DOCUMENT_SIGNAL_SELECTOR\)[\s\S]*?structuralCanvasCandidatesFor\(element\)/.test(contentJs), "Canvas-containing ancestors must be detectable structurally");
+assert(/function messageContainsCanvasDocument\(messageElement\) \{[\s\S]*?containsCanvasDocumentBlock\(messageElement\)[\s\S]*?querySelector\(CANVAS_DOCUMENT_SIGNAL_SELECTOR\)[\s\S]*?structuralCanvasCandidatesFor\(messageElement\)[\s\S]*?hasCanvasDocumentToolbarSignals\(messageElement\)/.test(contentJs), "message-level Canvas helper must check structural candidates, not only selector strings");
+assert(/Object\.assign\(globalThis\.__CGPT_DIRECTION_TEST_HOOKS__, \{[\s\S]*?messageContainsCanvasDocument[\s\S]*?canvasDocumentContainerFor[\s\S]*?isCanvasDocumentBlock/.test(contentJs), "test hooks must expose Canvas detection helpers");
 assert(/function shouldSkipAutoMessageBecauseItContainsCanvas\(messageElement\) \{\s*return selectedMode === "auto" && messageContainsCanvasDocument\(messageElement\);\s*\}/.test(contentJs), "Auto mode must skip entire messages/articles that contain Canvas");
 assert(/function getMessageTextTargets\(messageElement\) \{[\s\S]*?shouldSkipAutoMessageBecauseItContainsCanvas\(messageElement\)[\s\S]*?return \[\];/.test(contentJs), "getMessageTextTargets must return no targets for Canvas-containing messages in Auto");
 assert(/function getTableDirectionTargets\(messageElement\) \{[\s\S]*?shouldSkipAutoMessageBecauseItContainsCanvas\(messageElement\)[\s\S]*?return \[\];/.test(contentJs), "getTableDirectionTargets must return no targets for Canvas-containing messages in Auto");

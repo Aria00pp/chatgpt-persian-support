@@ -137,6 +137,17 @@ Canvas and document preview blocks are intentionally left native because ChatGPT
 - [ ] Code blocks remain LTR.
 - [ ] Long chats remain responsive in Auto mode.
 
+### Canvas detection debug checklist
+
+On a failing Canvas/document preview message, enable the content-script test hooks or use the debug console context, then verify:
+
+- [ ] `messageContainsCanvasDocument(message)` returns `true` for the assistant message/article that contains Canvas.
+- [ ] `canvasDocumentContainerFor(selectedCanvasTextElement)` returns a non-null Canvas/document preview container when called on an element inside selected Canvas text.
+- [ ] In Auto mode, `cgptAppliedCount` inside that Canvas-containing message is `0`, or any existing extension-applied state no longer affects the Canvas-containing message.
+- [ ] English Canvas content remains native/LTR.
+- [ ] Text selection inside Canvas has no lag.
+- [ ] Normal messages without Canvas still get Auto direction handling.
+
 ## Performance checklist
 
 Use this checklist after changing direction logic, especially in Auto mode:
