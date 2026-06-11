@@ -112,7 +112,9 @@
     "[aria-label*='artifact' i]",
     "[aria-label*='document preview' i]",
     "[class*='canvas' i]",
-    "[class*='artifact' i]"
+    "[class*='artifact' i]",
+    "[class*='document-preview' i]",
+    "[class*='documentPreview' i]"
   ].join(",");
 
   const CANVAS_DOCUMENT_TOOLBAR_CONTROL_RE = /\b(edit|copy|download|expand|open|fullscreen|preview)\b|ویرایش|کپی|دانلود|گسترش/i;
@@ -378,10 +380,20 @@
   }
 
   function messageContainsCanvasDocument(messageElement) {
-    return Boolean(messageElement instanceof Element && (
-      isCanvasDocumentBlock(messageElement) ||
-      containsCanvasDocumentBlock(messageElement)
-    ));
+    if (!(messageElement instanceof Element)) {
+      return false;
+    }
+
+    if (isCanvasDocumentBlock(messageElement) || containsCanvasDocumentBlock(messageElement)) {
+      return true;
+    }
+
+    const signaledDescendant = messageElement.querySelector(CANVAS_DOCUMENT_SIGNAL_SELECTOR);
+    if (signaledDescendant && !signaledDescendant.closest("nav, aside, header, footer, [role='menu'], [role='listbox']")) {
+      return true;
+    }
+
+    return hasCanvasDocumentToolbarSignals(messageElement);
   }
 
   function shouldSkipAutoMessageBecauseItContainsCanvas(messageElement) {
@@ -1825,6 +1837,10 @@
   }
 
   function applyDirectionToMessages(root = document) {
+    if (shouldSkipAutoMessageBecauseItContainsCanvas(root)) {
+      return;
+    }
+
     for (const messageElement of elementsMatchingOutsideCanvas(root, MESSAGE_SELECTOR, true)) {
       if (!isMessageElement(messageElement) || shouldSkipAutoMessageBecauseItContainsCanvas(messageElement)) {
         continue;
@@ -2104,6 +2120,10 @@
   }
 
   function applyDirectionToVisibleMessages(root = document) {
+    if (shouldSkipAutoMessageBecauseItContainsCanvas(root)) {
+      return undefined;
+    }
+
     return withPerfStats("visible message refresh", () => {
       refreshObservedMessages(root);
       for (const messageElement of elementsMatchingOutsideCanvas(root, MESSAGE_SELECTOR, true)) {
@@ -2159,7 +2179,7 @@
   }
 
   function scheduleApply(root = document, options = {}) {
-    if (root instanceof Element && (isCanvasDocumentBlock(root) || isInsideCanvasDocumentBlock(root))) {
+    if (root instanceof Element && (isCanvasDocumentBlock(root) || isInsideCanvasDocumentBlock(root) || shouldSkipAutoMessageBecauseItContainsCanvas(root.closest(MESSAGE_SELECTOR) || root))) {
       return;
     }
 
