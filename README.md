@@ -10,10 +10,10 @@ The extension applies the selected mode to messages already on the page and uses
 - Adds a compact **Auto / RTL / LTR** control near the composer, with the active mode visibly indicated.
 - **RTL** makes the composer and message prose right-to-left and right-aligned.
 - **LTR** makes the composer and message prose left-to-right and left-aligned.
-- **Auto** detects the first strong Persian/Arabic/Hebrew or Latin character. Composer direction updates live, while each message independently receives its detected direction. Empty or ambiguous text defaults to RTL.
-- Formats user and assistant message prose, including existing and dynamically generated content, without forcing action bars or surrounding controls into a direction.
+- **Auto** detects direction per rendered text block for messages and Canvas document previews: English-dominant paragraphs/lines are LTR and left-aligned, while Persian/RTL-dominant paragraphs/lines are RTL and right-aligned. Composer direction still updates live, and empty or ambiguous text defaults to RTL.
+- Formats user and assistant message prose, including existing and dynamically generated content, without forcing action bars, Canvas roots, large message containers, or surrounding controls into a single direction.
 - Applies the selected direction to the main composer plus prompt-like edit and retry/regenerate input areas, including a full-document active-edit scan for ChatGPT edit boxes that appear outside the normal composer structure.
-- Uses CSS inline isolation for bold, italic, quote, link, and span content so mixed Persian-English prose is easier to read without mutating rendered message text or composer text.
+- Uses CSS inline isolation for bold, italic, quote, link, and span content so mixed Persian-English prose is easier to read without mutating rendered message text, wrapping text nodes, or interfering with Canvas selection/copy.
 - Keeps code blocks, inline code, keyboard input, terminal-like output, math, and common syntax-highlighted/editor elements LTR and left-aligned; prose table layout follows RTL/LTR mode or header-detected Auto direction, while cells are detected independently so Persian, English, and mixed cells remain readable.
 - Does not replace, clone, wrap, or modify the text in ChatGPT's native composer.
 - Uses no external dependencies, remote code, network requests, telemetry, analytics, or tracking.
@@ -83,6 +83,16 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] Existing user and assistant messages update after a mode switch.
 - [ ] Newly streamed assistant messages follow the selected mode and re-detect while streaming in Auto mode.
 - [ ] In Auto mode, Persian-first and English-first messages can have independent directions.
+- [ ] Normal assistant response with an English paragraph plus a Persian paragraph: English is LTR/left-aligned, and Persian is RTL/right-aligned.
+- [ ] Normal user message with an English paragraph plus a Persian paragraph: English is LTR/left-aligned, and Persian is RTL/right-aligned.
+- [ ] Canvas document with an English paragraph plus a Persian paragraph: English is LTR/left-aligned, and Persian is RTL/right-aligned.
+- [ ] English-only Canvas remains LTR and left-aligned.
+- [ ] Persian-only Canvas remains RTL, right-aligned, and readable.
+- [ ] Quoted Persian sentence remains RTL and is not classified as LTR because of punctuation or quotes.
+- [ ] English and Persian lists keep correct bullet alignment and indentation.
+- [ ] First drag-selection inside Canvas is immediate.
+- [ ] Selecting another part of Canvas remains immediate.
+- [ ] Copying selected Canvas text works.
 - [ ] Mixed Persian-English text with bold, italic, quotes, and punctuation remains readable.
 - [ ] Ask ChatGPT: `به فارسی توضیح بده: Auto mode و shortcut و input handler و composer و target و live یعنی چه. از bold و italic هم استفاده کن.` Confirm English fragments remain visually stable inside the Persian paragraph.
 - [ ] English words such as `bug`, `polish`, `Auto mode`, and `direction` remain visually stable inside Persian-first prose when covered by CSS inline isolation.
@@ -91,8 +101,12 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] No JS text-node wrapping is used on rendered ChatGPT messages.
 - [ ] Response-change popup still works after typing mixed Persian-English text.
 - [ ] Edit mode still works after typing mixed Persian-English text.
+- [ ] Composer works after switching between Auto / RTL / LTR.
+- [ ] Edit mode works after switching between Auto / RTL / LTR.
+- [ ] Response-change popup works after switching between Auto / RTL / LTR.
+- [ ] Tables work and keep stable layout while cells are detected independently.
 - [ ] Code blocks remain LTR and left-aligned in all modes.
-- [ ] Inline code remains LTR and readable.
+- [ ] Inline code is unchanged, LTR, and readable.
 - [ ] Tables keep stable column order and do not flip unpredictably.
 - [ ] In Auto and RTL modes, Persian/RTL table headers place the first logical column on the right and the last logical column on the left.
 - [ ] English-only tables remain readable and keep expected LTR column order in Auto and LTR modes.
@@ -116,6 +130,7 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 
 Use this checklist after changing direction logic, especially in Auto mode:
 
+- [ ] Long chats remain responsive in Auto mode.
 - [ ] Opening a long chat with many existing messages and code blocks remains responsive in Auto mode.
 - [ ] Visible and near-visible messages format quickly after the chat loads.
 - [ ] Offscreen messages may remain raw briefly, then format lazily as they approach the viewport while scrolling.

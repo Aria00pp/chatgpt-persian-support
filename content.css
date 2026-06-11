@@ -5,8 +5,7 @@
 .cgpt-dir-composer.cgpt-dir-rtl textarea,
 .cgpt-dir-composer.cgpt-dir-rtl p,
 .cgpt-dir-composer.cgpt-dir-rtl [data-placeholder],
-.cgpt-dir-message.cgpt-dir-rtl,
-.cgpt-dir-message.cgpt-dir-rtl :is(p, h1, h2, h3, h4, h5, h6, blockquote, li, dd, dt) {
+.cgpt-dir-message.cgpt-dir-rtl {
   direction: rtl !important;
   text-align: right !important;
   unicode-bidi: isolate !important;
@@ -18,18 +17,10 @@
 .cgpt-dir-composer.cgpt-dir-ltr textarea,
 .cgpt-dir-composer.cgpt-dir-ltr p,
 .cgpt-dir-composer.cgpt-dir-ltr [data-placeholder],
-.cgpt-dir-message.cgpt-dir-ltr,
-.cgpt-dir-message.cgpt-dir-ltr :is(p, h1, h2, h3, h4, h5, h6, blockquote, li, dd, dt) {
+.cgpt-dir-message.cgpt-dir-ltr {
   direction: ltr !important;
   text-align: left !important;
   unicode-bidi: isolate !important;
-}
-
-.cgpt-dir-message.cgpt-dir-rtl :is(ul, ol) {
-  direction: rtl !important;
-  text-align: right !important;
-  padding-right: 1.625rem;
-  padding-left: 0;
 }
 
 .cgpt-dir-message.cgpt-dir-rtl blockquote {
@@ -37,11 +28,6 @@
   border-left: 0 !important;
   padding-right: 1rem;
   padding-left: 0 !important;
-}
-
-.cgpt-dir-message.cgpt-dir-ltr :is(ul, ol) {
-  direction: ltr !important;
-  text-align: left !important;
 }
 
 /* Inline formatting is isolated so mixed Persian-English prose stays readable without changing text. */

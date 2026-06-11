@@ -73,10 +73,37 @@ for (const helper of [
   "enqueueMessageForDirection",
   "processDirectionQueue",
   "applyDirectionToVisibleMessages",
-  "applyInteractiveDirections"
+  "applyInteractiveDirections",
+  "isRenderedTextDirectionBlock",
+  "getRenderedTextDirectionBlocks",
+  "getMessageTextDirectionBlocks",
+  "getCanvasTextDirectionBlocks",
+  "isCanvasBlock",
+  "lockCanvasDirection",
+  "isCanvasDirectionLocked",
+  "shouldSkipCanvasWrite"
 ]) {
   assert(contentJs.includes(`function ${helper}`), `helper missing: ${helper}`);
 }
+
+
+assert(contentJs.includes("RENDERED_TEXT_BLOCK_SELECTOR"), "Auto mode must define rendered text block targeting");
+assert(contentJs.includes("NON_SEMANTIC_TEXT_CONTAINER_SELECTOR"), "Canvas Auto mode must support non-semantic text containers");
+assert(/function getMessageTextDirectionBlocks\(messageElement\) \{[\s\S]*?getRenderedTextDirectionBlocks/.test(contentJs), "normal messages must use rendered text block / paragraph-level targeting");
+assert(/function getMessageTextDirectionBlocks\(messageElement\) \{[\s\S]*?blocks\.length > 0[\s\S]*?uniqueBlocks[\s\S]*?element\.contains\(other\)/.test(contentJs), "Auto mode must prefer smaller rendered blocks over large message containers");
+assert(/function getCanvasTextDirectionBlocks\(canvasBlock\) \{[\s\S]*?getRenderedTextDirectionBlocks\(canvasBlock\)[\s\S]*?element !== canvasBlock/.test(contentJs), "Canvas Auto mode must not target the large Canvas container");
+assert(/function isMeaningfulNonSemanticTextBlock\(element\) \{[\s\S]*?NON_SEMANTIC_TEXT_CONTAINER_SELECTOR[\s\S]*?directRenderedText/.test(contentJs), "Canvas block detection must include meaningful direct-text div/span containers");
+assert(/function directionFor\(element, kind\) \{[\s\S]*?kind === MESSAGE_CLASS[\s\S]*?renderedTextForDirectionBlock\(element\)/.test(contentJs), "Auto mode must detect rendered block direction from each block's own visible text");
+assert(contentJs.includes('return "ltr";') && contentJs.includes('return "rtl";') && contentJs.includes("stats.rtlCount >= stats.latinCount"), "English-dominant blocks must receive LTR and Persian-dominant blocks must receive RTL");
+assert(contentJs.includes("isShortLatinPrefixBeforeRtl(text, stats)"), "quoted or prefixed Persian text must not be misclassified as LTR");
+assert(/function reconcileAppliedElements\(\) \{[\s\S]*?getMessageTextDirectionBlocks[\s\S]*?removeDirection\(element\)/.test(contentJs), "stale large-container direction cleanup must remove old extension targets");
+assert(contentJs.includes("canvasInteractionLocks") && contentJs.includes("CANVAS_LOCK_EXTENSION_MS"), "Canvas interaction lock must exist");
+assert(/function shouldSkipCanvasWrite\(element\) \{[\s\S]*?isCanvasDirectionLocked[\s\S]*?return true/.test(contentJs), "Canvas apply/cleanup must skip writes while locked");
+assert(!/selectionchange[\s\S]{0,240}window\.getSelection/.test(contentJs), "selectionchange must remain cheap and must not call window.getSelection");
+assert(contentJs.includes('document.addEventListener("pointerdown", handleCanvasInteraction, true)'), "Canvas pointerdown must lock direction writes");
+assert(contentJs.includes('document.addEventListener("copy", handleCanvasInteraction, true)'), "Canvas copy must extend the interaction lock");
+assert(contentJs.includes("handleCanvasCopyShortcut"), "Ctrl/Cmd+C must extend the Canvas interaction lock");
+assert(!/\.cgpt-dir-message\.cgpt-dir-(?:rtl|ltr)\s+:is\(p, h1, h2, h3, h4, h5, h6, blockquote, li, dd, dt\)/.test(contentCss), "message CSS must not let stale large containers force all child blocks in one direction");
 
 assert(contentJs.includes("chrome.storage.local"), "mode storage must continue using chrome.storage.local");
 assert(contentJs.includes("createDirectionControl"), "direction control must still exist");
