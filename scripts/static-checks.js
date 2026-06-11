@@ -21,6 +21,9 @@ for (const api of ["fetch(", "XMLHttpRequest", "sendBeacon", "WebSocket"]) {
 
 
 assert(contentJs.includes("const CANVAS_DOCUMENT_SIGNAL_SELECTOR"), "Canvas/document preview signal selector must exist");
+assert(contentJs.includes("const STRUCTURAL_CANVAS_CANDIDATE_SELECTOR"), "structural Canvas candidate selector must exist");
+assert(contentJs.includes("function isStructuralCanvasDocumentBlock"), "structural Canvas detection helper must exist");
+assert(contentJs.includes("function structuralCanvasCandidatesFor"), "structural Canvas candidate helper must exist");
 assert(!contentJs.includes("TreeWalker"), "TreeWalker must not be used for Canvas or message scanning");
 
 for (const eventName of ["selectionchange", "selectstart", "copy", "pointerdown", "pointerup", "pointermove", "mousedown", "mouseup", "mousemove", "mouseover", "mouseout", "mouseenter", "mouseleave"]) {
@@ -46,6 +49,19 @@ assert(/function applyDirection\(element, kind, forcedDirection = null\) \{[\s\S
 assert(/function applyInlineDirectionStyle\(element, direction\) \{[\s\S]*?isInsideCanvasDocumentBlock\(element\)[\s\S]*?return/.test(contentJs), "inline direction styles must not be applied inside Canvas");
 assert(/function scheduleApply\(root = document, options = \{\}\) \{[\s\S]*?isInsideCanvasDocumentBlock\(root\)[\s\S]*?return/.test(contentJs), "scheduled direction passes must ignore Canvas roots");
 assert(/new MutationObserver\(\(mutations\) => \{[\s\S]*?isInsideCanvasDocumentBlock\(target\)[\s\S]*?containsCanvasDocumentBlock\(element\)[\s\S]*?continue/.test(contentJs), "MutationObserver must ignore Canvas mutations and Canvas additions");
+assert(/function isCanvasDocumentBlock\(element\) \{[\s\S]*?CANVAS_DOCUMENT_SIGNAL_SELECTOR[\s\S]*?isStructuralCanvasDocumentBlock\(element\)/.test(contentJs), "Canvas detection must not be selector-only");
+assert(/function canvasDocumentContainerFor\(element\) \{[\s\S]*?closest\(CANVAS_DOCUMENT_SIGNAL_SELECTOR\)[\s\S]*?isStructuralCanvasDocumentBlock\(current\)/.test(contentJs), "Canvas container lookup must find structural Canvas ancestors");
+assert(/function containsCanvasDocumentBlock\(element\) \{[\s\S]*?structuralCanvasCandidatesFor\(element\)\.length > 0/.test(contentJs), "Canvas containment must check structural candidates");
+assert(/function isStructuralCanvasDocumentBlock\(element\) \{[\s\S]*?assistantMessageContainerFor\(element\)[\s\S]*?element !== messageElement[\s\S]*?!element\.matches\(MESSAGE_SELECTOR\)[\s\S]*?!element\.matches\(CANVAS_DOCUMENT_SIMPLE_BLOCK_SELECTOR\)/.test(contentJs), "structural Canvas detection must be scoped to assistant messages and avoid whole/simple message blocks");
+assert(contentJs.includes("!element.closest(CANVAS_DOCUMENT_EXCLUDED_ANCESTOR_SELECTOR)"), "structural Canvas detection must avoid excluded UI");
+assert(contentJs.includes("(!element.matches(MESSAGE_PROSE_SELECTOR) || hasScrollableCanvasPanelStructure(element))"), "structural Canvas detection must avoid normal markdown/prose roots while allowing panel structures");
+assert(/function isCanvasDocumentBlock\(element\) \{[\s\S]*?!element\.matches\(MESSAGE_SELECTOR\)[\s\S]*?isStructuralCanvasDocumentBlock\(element\)/.test(contentJs), "Canvas block detection must not classify whole messages as Canvas");
+assert(/function isStructuralCanvasDocumentBlock\(element\) \{[\s\S]*?textContent[\s\S]*?textLength >= 240[\s\S]*?hasDocumentLikeCanvasStructure\(element\)[\s\S]*?hasLocalCanvasControls\(element\) \|\| hasScrollableCanvasPanelStructure\(element\)/.test(contentJs), "structural Canvas detection must require substantial text, document-like structure, and controls or panel structure");
+assert(/function structuralCanvasCandidatesFor\(messageElement\) \{[\s\S]*?querySelectorAll\(STRUCTURAL_CANVAS_CANDIDATE_SELECTOR\)[\s\S]*?isStructuralCanvasDocumentBlock\(element\)/.test(contentJs), "structural Canvas candidates must use targeted querySelectorAll and structural filtering");
+assert(contentJs.includes("messageContainsCanvasDocument"), "Canvas debug output must include messageContainsCanvasDocument");
+assert(contentJs.includes("hasCanvasContainer"), "Canvas debug output must include hasCanvasContainer");
+assert(contentJs.includes("selectedInsideCanvasDocumentBlock"), "Canvas debug output must include selectedInsideCanvasDocumentBlock");
+assert(contentJs.includes("cgptAppliedCount"), "Canvas debug output must include cgptAppliedCount");
 
 for (const mode of ["auto", "rtl", "ltr"]) {
   assert(contentJs.includes(`"${mode}"`), `mode string missing: ${mode}`);
@@ -105,7 +121,11 @@ for (const helper of [
   "isCanvasDocumentBlock",
   "canvasDocumentContainerFor",
   "isInsideCanvasDocumentBlock",
-  "containsCanvasDocumentBlock"
+  "containsCanvasDocumentBlock",
+  "isStructuralCanvasDocumentBlock",
+  "structuralCanvasCandidatesFor",
+  "canvasDocumentDebugSnapshot",
+  "inspectCanvasDocumentContext"
 ]) {
   assert(contentJs.includes(`function ${helper}`), `helper missing: ${helper}`);
 }

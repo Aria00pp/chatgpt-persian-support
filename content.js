@@ -210,6 +210,48 @@
     "[class*='document-preview' i]"
   ].join(",");
 
+  const STRUCTURAL_CANVAS_CANDIDATE_SELECTOR = [
+    "div",
+    "section",
+    "article",
+    "[role='document']",
+    "[role='region']",
+    "[role='main']"
+  ].join(",");
+
+  const CANVAS_DOCUMENT_EXCLUDED_ANCESTOR_SELECTOR = [
+    "nav",
+    "aside",
+    "header",
+    "footer",
+    "[role='dialog']",
+    "[aria-modal='true']",
+    "[role='menu']",
+    "[role='listbox']"
+  ].join(",");
+
+  const CANVAS_DOCUMENT_SIMPLE_BLOCK_SELECTOR = [
+    "p",
+    "li",
+    "blockquote",
+    "pre",
+    "code",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6"
+  ].join(",");
+
+  const CANVAS_DOCUMENT_BLOCK_CHILD_SELECTOR = "p, div, section, article, ul, ol, blockquote, h1, h2, h3, h4, h5, h6";
+
   const MESSAGE_OBSERVER_ROOT_MARGIN = "1200px 0px";
   const MESSAGE_OBSERVER_MARGIN_PX = 1200;
   const MAX_MESSAGES_PER_FRAME = 6;
@@ -221,6 +263,7 @@
   const elementTextSignatureCache = new WeakMap();
   const tableLayoutDirectionCache = new WeakMap();
   const tableCellDirectionCache = new WeakMap();
+  const structuralCanvasDetectionCache = new WeakMap();
   let selectedMode = DEFAULT_MODE;
   let debugEnabled = false;
   let fullScanScheduled = false;
@@ -233,8 +276,115 @@
   const observedMessages = new WeakSet();
 
 
+  function assistantMessageContainerFor(element) {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    const authorMessage = element.closest("[data-message-author-role]");
+    if (authorMessage) {
+      return authorMessage.matches("[data-message-author-role='assistant']") ? authorMessage : null;
+    }
+
+    const article = element.closest("main article");
+    if (!article || article.querySelector("[data-message-author-role='user']")) {
+      return null;
+    }
+
+    return article.querySelector("[data-message-author-role='assistant']") ? article : null;
+  }
+
+  function directDocumentBlockChildCount(element) {
+    let count = 0;
+    for (const child of element.children) {
+      if (child.matches(CANVAS_DOCUMENT_BLOCK_CHILD_SELECTOR)) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  function hasScrollableCanvasPanelStructure(element) {
+    const style = window.getComputedStyle ? window.getComputedStyle(element) : null;
+    const overflowValue = style ? `${style.overflow} ${style.overflowY} ${style.overflowX}` : "";
+    const hasScrollableOverflow = /auto|scroll/i.test(overflowValue) && (
+      element.scrollHeight > element.clientHeight + 24 ||
+      element.scrollWidth > element.clientWidth + 24
+    );
+    const hasPanelRole = element.matches("[role='document'], [role='region'], [role='main']");
+    const classHint = String(element.className || "");
+    const hasPanelClass = /(?:^|[-_\s])(overflow|scroll|panel|card|sheet|document|preview|rounded|border|shadow|h-full|max-h|w-full|flex|grid)(?:$|[-_\s])/i.test(classHint);
+
+    return hasScrollableOverflow || hasPanelRole || hasPanelClass;
+  }
+
+  function hasLocalCanvasControls(element) {
+    return [...element.querySelectorAll("button, [role='button'], [role='toolbar'], [aria-label], svg")]
+      .some((control) => !control.closest("pre, code, table"));
+  }
+
+  function hasDocumentLikeCanvasStructure(element) {
+    const directBlockCount = directDocumentBlockChildCount(element);
+    const nestedBlockCount = element.querySelectorAll(CANVAS_DOCUMENT_BLOCK_CHILD_SELECTOR).length;
+    const hasHeadingAndParagraph = Boolean(element.querySelector("h1, h2, h3")) && Boolean(element.querySelector("p, ul, ol"));
+    const hasMultipleSections = element.querySelectorAll("section, article").length >= 2;
+
+    return directBlockCount >= 2 || nestedBlockCount >= 5 || hasHeadingAndParagraph || hasMultipleSections;
+  }
+
+  function isStructuralCanvasDocumentBlock(element) {
+    if (!(element instanceof Element)) {
+      return false;
+    }
+
+    const textLength = (element.textContent || "").replace(/\s+/g, " ").trim().length;
+    const signature = [
+      textLength,
+      element.childElementCount,
+      element.scrollHeight,
+      element.clientHeight,
+      String(element.className || "")
+    ].join(":");
+    const cached = structuralCanvasDetectionCache.get(element);
+    if (cached && cached.signature === signature) {
+      return cached.result;
+    }
+
+    const messageElement = assistantMessageContainerFor(element);
+    const result = Boolean(
+      messageElement &&
+      element !== messageElement &&
+      !element.matches(MESSAGE_SELECTOR) &&
+      !element.matches(CANVAS_DOCUMENT_SIMPLE_BLOCK_SELECTOR) &&
+      !element.closest(CANVAS_DOCUMENT_EXCLUDED_ANCESTOR_SELECTOR) &&
+      (!element.matches(MESSAGE_PROSE_SELECTOR) || hasScrollableCanvasPanelStructure(element)) &&
+      textLength >= 240 &&
+      hasDocumentLikeCanvasStructure(element) &&
+      (hasLocalCanvasControls(element) || hasScrollableCanvasPanelStructure(element))
+    );
+
+    structuralCanvasDetectionCache.set(element, { signature, result });
+    return result;
+  }
+
+  function structuralCanvasCandidatesFor(messageElement) {
+    const root = assistantMessageContainerFor(messageElement);
+    if (!root || !(messageElement instanceof Element)) {
+      return [];
+    }
+
+    const searchRoot = root.contains(messageElement) ? messageElement : root;
+    const candidates = [...searchRoot.querySelectorAll(STRUCTURAL_CANVAS_CANDIDATE_SELECTOR)]
+      .filter((element) => isStructuralCanvasDocumentBlock(element));
+    return topLevelTargets(candidates);
+  }
+
   function isCanvasDocumentBlock(element) {
-    return Boolean(element instanceof Element && element.matches(CANVAS_DOCUMENT_SIGNAL_SELECTOR));
+    return Boolean(
+      element instanceof Element &&
+      !element.matches(MESSAGE_SELECTOR) &&
+      (element.matches(CANVAS_DOCUMENT_SIGNAL_SELECTOR) || isStructuralCanvasDocumentBlock(element))
+    );
   }
 
   function canvasDocumentContainerFor(element) {
@@ -242,7 +392,25 @@
       return null;
     }
 
-    return element.closest(CANVAS_DOCUMENT_SIGNAL_SELECTOR);
+    const selectorContainer = element.closest(CANVAS_DOCUMENT_SIGNAL_SELECTOR);
+    if (selectorContainer) {
+      return selectorContainer;
+    }
+
+    const messageElement = assistantMessageContainerFor(element);
+    if (!messageElement) {
+      return null;
+    }
+
+    let current = element;
+    while (current && current !== messageElement.parentElement) {
+      if (isStructuralCanvasDocumentBlock(current)) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+
+    return null;
   }
 
   function isInsideCanvasDocumentBlock(element) {
@@ -252,7 +420,11 @@
   function containsCanvasDocumentBlock(element) {
     return Boolean(
       element instanceof Element &&
-      (isCanvasDocumentBlock(element) || element.querySelector(CANVAS_DOCUMENT_SIGNAL_SELECTOR))
+      (
+        isCanvasDocumentBlock(element) ||
+        element.querySelector(CANVAS_DOCUMENT_SIGNAL_SELECTOR) ||
+        structuralCanvasCandidatesFor(element).length > 0
+      )
     );
   }
 
@@ -745,6 +917,35 @@
     return parentChain;
   }
 
+
+  function canvasDocumentDebugSnapshot(element) {
+    const selection = window.getSelection ? window.getSelection() : null;
+    const selectedNode = selection && selection.rangeCount > 0 ? selection.anchorNode : null;
+    const selectedElement = selectedNode instanceof Element ? selectedNode : selectedNode && selectedNode.parentElement;
+    const inspectedElement = element instanceof Element ? element : selectedElement;
+    const messageElement = inspectedElement ? assistantMessageContainerFor(inspectedElement) : null;
+    const canvasContainer = selectedElement ? canvasDocumentContainerFor(selectedElement) : inspectedElement && canvasDocumentContainerFor(inspectedElement);
+    const appliedRoot = canvasContainer || messageElement || inspectedElement;
+    const cgptAppliedCount = appliedRoot && typeof appliedRoot.querySelectorAll === "function"
+      ? appliedRoot.querySelectorAll(`.${APPLIED_CLASS}`).length + (appliedRoot.classList.contains(APPLIED_CLASS) ? 1 : 0)
+      : 0;
+
+    return {
+      messageContainsCanvasDocument: Boolean(messageElement && containsCanvasDocumentBlock(messageElement)),
+      containsCanvasDocumentBlock: Boolean(inspectedElement && containsCanvasDocumentBlock(inspectedElement)),
+      hasCanvasContainer: Boolean(canvasContainer),
+      selectedInsideCanvasDocumentBlock: Boolean(selectedElement && isInsideCanvasDocumentBlock(selectedElement)),
+      cgptAppliedCount,
+      selectedElement: elementSummary(selectedElement, false),
+      canvasContainer: elementSummary(canvasContainer, false),
+      messageElement: elementSummary(messageElement, false)
+    };
+  }
+
+  function inspectCanvasDocumentContext() {
+    console.info("[ChatGPT Persian Direction] canvas document debug", canvasDocumentDebugSnapshot(document.activeElement));
+  }
+
   function debugEditableContext(element, reason, force = false) {
     if (!(element instanceof Element) || (!force && (!isDebugEnabled() || !isFloatingDebugContext(element)))) {
       return;
@@ -771,6 +972,7 @@
       hasResponseChangeContext: hasResponseChangeContext(element),
       isActiveEditableComposer: isActiveEditableComposer(element),
       isComposerElement: isComposerElement(element),
+      canvasDocument: canvasDocumentDebugSnapshot(element),
       responseChangeContainer: elementSummary(container),
       hasResponseChangeMenuSignals: hasResponseChangeMenuSignals(container),
       hasIconOnlySubmitButtonNearEditable: hasIconOnlySubmitButtonNearEditable(element, container),
@@ -839,6 +1041,8 @@
       console.info("[ChatGPT Persian Direction] debug disabled");
     } else if (event.type === "cgpt-rtl-inspect-active") {
       inspectActiveEditableContext();
+    } else if (event.type === "cgpt-rtl-inspect-canvas") {
+      inspectCanvasDocumentContext();
     }
   }
 
@@ -846,6 +1050,7 @@
     document.addEventListener("cgpt-rtl-debug-enable", handleDebugEvent);
     document.addEventListener("cgpt-rtl-debug-disable", handleDebugEvent);
     document.addEventListener("cgpt-rtl-inspect-active", handleDebugEvent);
+    document.addEventListener("cgpt-rtl-inspect-canvas", handleDebugEvent);
   }
   function getComposerContainer(element) {
     if (isExcludedUiArea(element)) {
