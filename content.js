@@ -222,6 +222,8 @@
   const MESSAGE_OBSERVER_ROOT_MARGIN = "1200px 0px";
   const MESSAGE_OBSERVER_MARGIN_PX = 1200;
   const MAX_MESSAGES_PER_FRAME = 6;
+  const CANVAS_SELECTION_CLEAR_DELAY_MS = 1100;
+  const CANVAS_APPLY_IDLE_TIMEOUT_MS = 1500;
 
   const pendingRoots = new Set();
   const originalDirections = new WeakMap();
@@ -240,6 +242,7 @@
   let messageObserver = null;
   let directionQueueScheduled = false;
   let canvasDocumentApplyScheduled = false;
+  let canvasDocumentApplyTimer = 0;
   let canvasSelectionInProgress = false;
   let canvasSelectionBlock = null;
   let canvasSelectionPointerDown = false;
@@ -1223,38 +1226,113 @@
     }
   }
 
+  function flushPendingCanvasDocumentAppliesWhenIdle() {
+    if (hasActiveSelectionInsideCanvas()) {
+      extendCanvasSelectionGuard();
+      clearCanvasSelectionGuardWhenSafe();
+      return;
+    }
+
+    const roots = [...pendingCanvasDocumentRoots];
+    pendingCanvasDocumentRoots.clear();
+    for (const pendingRoot of roots) {
+      if (pendingRoot.isConnected && !isCanvasSelectionInProgressFor(pendingRoot)) {
+        applyDirectionToCanvasDocuments(pendingRoot);
+      } else if (pendingRoot.isConnected) {
+        pendingCanvasDocumentRoots.add(pendingRoot);
+      }
+    }
+
+    if (pendingCanvasDocumentRoots.size > 0) {
+      scheduleCanvasDocumentApply([...pendingCanvasDocumentRoots][0]);
+    }
+  }
+
   function scheduleCanvasDocumentApply(root) {
     if (!(root instanceof Element) || !root.isConnected) {
       return;
     }
 
-    if (isCanvasSelectionInProgressFor(root)) {
-      pendingCanvasDocumentRoots.add(canvasDocumentContainerFor(root) || root);
+    pendingCanvasDocumentRoots.add(canvasDocumentContainerFor(root) || root);
+    if (isCanvasSelectionInProgressFor(root) || hasActiveSelectionInsideCanvas(root)) {
+      clearCanvasSelectionGuardWhenSafe();
       return;
     }
 
-    pendingCanvasDocumentRoots.add(canvasDocumentContainerFor(root) || root);
     if (canvasDocumentApplyScheduled) {
       return;
     }
 
     canvasDocumentApplyScheduled = true;
-    setTimeout(() => {
-      canvasDocumentApplyScheduled = false;
-      const roots = [...pendingCanvasDocumentRoots];
-      pendingCanvasDocumentRoots.clear();
-      for (const pendingRoot of roots) {
-        if (pendingRoot.isConnected && !isCanvasSelectionInProgressFor(pendingRoot)) {
-          applyDirectionToCanvasDocuments(pendingRoot);
-        }
-      }
-    }, 180);
+    canvasDocumentApplyTimer = setTimeout(() => {
+      canvasDocumentApplyTimer = 0;
+      scheduleIdleWork(() => {
+        canvasDocumentApplyScheduled = false;
+        flushPendingCanvasDocumentAppliesWhenIdle();
+      }, CANVAS_APPLY_IDLE_TIMEOUT_MS);
+    }, CANVAS_SELECTION_CLEAR_DELAY_MS);
   }
 
-  function beginCanvasSelection(element) {
-    const block = canvasDocumentContainerFor(element);
+  function elementForSelectionNode(node) {
+    if (node instanceof Element) {
+      return node;
+    }
+
+    return node && node.parentElement ? node.parentElement : null;
+  }
+
+  function currentCanvasSelectionBlock() {
+    const selection = window.getSelection ? window.getSelection() : null;
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+      return null;
+    }
+
+    for (let index = 0; index < selection.rangeCount; index += 1) {
+      const range = selection.getRangeAt(index);
+      if (!range || range.collapsed) {
+        continue;
+      }
+
+      const nodes = [
+        range.commonAncestorContainer,
+        range.startContainer,
+        range.endContainer,
+        selection.anchorNode,
+        selection.focusNode
+      ];
+
+      for (const node of nodes) {
+        const element = elementForSelectionNode(node);
+        const block = element ? canvasDocumentContainerFor(element) : null;
+        if (block) {
+          return block;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function hasActiveSelectionInsideCanvas(element = null) {
+    const selectedBlock = currentCanvasSelectionBlock();
+    if (!selectedBlock) {
+      return false;
+    }
+
+    if (!(element instanceof Element)) {
+      return true;
+    }
+
+    const block = canvasDocumentContainerFor(element) || (isCanvasDocumentBlock(element) ? element : null);
+    return Boolean(block && (block === selectedBlock || block.contains(selectedBlock) || selectedBlock.contains(block)));
+  }
+
+  function extendCanvasSelectionGuard(element = null) {
+    const block = element instanceof Element
+      ? (canvasDocumentContainerFor(element) || currentCanvasSelectionBlock())
+      : currentCanvasSelectionBlock();
     if (!block) {
-      return;
+      return false;
     }
 
     canvasSelectionInProgress = true;
@@ -1263,10 +1341,20 @@
       clearTimeout(canvasSelectionEndTimer);
       canvasSelectionEndTimer = 0;
     }
+    if (canvasDocumentApplyTimer) {
+      clearTimeout(canvasDocumentApplyTimer);
+      canvasDocumentApplyTimer = 0;
+      canvasDocumentApplyScheduled = false;
+    }
+    return true;
   }
 
-  function endCanvasSelectionSoon() {
-    if (!canvasSelectionInProgress) {
+  function beginCanvasSelection(element) {
+    extendCanvasSelectionGuard(element);
+  }
+
+  function clearCanvasSelectionGuardWhenSafe(delay = CANVAS_SELECTION_CLEAR_DELAY_MS) {
+    if (!canvasSelectionInProgress && !hasActiveSelectionInsideCanvas()) {
       return;
     }
 
@@ -1275,18 +1363,39 @@
     }
 
     canvasSelectionEndTimer = setTimeout(() => {
+      const activeBlock = currentCanvasSelectionBlock();
+      if (activeBlock) {
+        canvasSelectionInProgress = true;
+        canvasSelectionBlock = activeBlock;
+        clearCanvasSelectionGuardWhenSafe(delay);
+        return;
+      }
+
       const block = canvasSelectionBlock;
       canvasSelectionInProgress = false;
       canvasSelectionBlock = null;
+      canvasSelectionPointerDown = false;
       canvasSelectionEndTimer = 0;
       if (block && block.isConnected) {
         scheduleCanvasDocumentApply(block);
       }
-    }, 220);
+    }, delay);
+  }
+
+  function endCanvasSelectionSoon() {
+    clearCanvasSelectionGuardWhenSafe();
   }
 
   function isCanvasSelectionInProgressFor(element) {
-    if (!canvasSelectionInProgress || !(element instanceof Element)) {
+    if (!(element instanceof Element)) {
+      return false;
+    }
+
+    if (hasActiveSelectionInsideCanvas(element)) {
+      return true;
+    }
+
+    if (!canvasSelectionInProgress) {
       return false;
     }
 
@@ -1302,13 +1411,32 @@
         beginCanvasSelection(target);
       }
     };
+    const maintainSelectionGuard = () => {
+      if (extendCanvasSelectionGuard()) {
+        clearCanvasSelectionGuardWhenSafe();
+      }
+    };
     const endPointerSelection = () => {
       canvasSelectionPointerDown = false;
-      endCanvasSelectionSoon();
+      maintainSelectionGuard();
+      clearCanvasSelectionGuardWhenSafe();
     };
     const endKeyboardSelection = () => {
       if (!canvasSelectionPointerDown) {
-        endCanvasSelectionSoon();
+        maintainSelectionGuard();
+        clearCanvasSelectionGuardWhenSafe();
+      }
+    };
+    const guardCopy = (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if ((target && isInsideCanvasDocumentBlock(target)) || hasActiveSelectionInsideCanvas()) {
+        extendCanvasSelectionGuard(target);
+        clearCanvasSelectionGuardWhenSafe(CANVAS_SELECTION_CLEAR_DELAY_MS + 400);
+      }
+    };
+    const guardCopyShortcut = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.code === "KeyC" && hasActiveSelectionInsideCanvas()) {
+        guardCopy(event);
       }
     };
 
@@ -1317,7 +1445,10 @@
     document.addEventListener("pointerup", endPointerSelection, true);
     document.addEventListener("mouseup", endPointerSelection, true);
     document.addEventListener("keyup", endKeyboardSelection, true);
-    document.addEventListener("selectionchange", endKeyboardSelection, true);
+    document.addEventListener("selectionchange", maintainSelectionGuard, true);
+    document.addEventListener("beforecopy", guardCopy, true);
+    document.addEventListener("copy", guardCopy, true);
+    document.addEventListener("keydown", guardCopyShortcut, true);
     window.addEventListener("blur", endPointerSelection, true);
   }
 

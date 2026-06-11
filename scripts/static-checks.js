@@ -82,6 +82,10 @@ for (const helper of [
   "directionForCanvasDocumentBlock",
   "applyDirectionToCanvasDocumentBlock",
   "applyDirectionToCanvasDocuments",
+  "currentCanvasSelectionBlock",
+  "hasActiveSelectionInsideCanvas",
+  "extendCanvasSelectionGuard",
+  "clearCanvasSelectionGuardWhenSafe",
   "beginCanvasSelection",
   "endCanvasSelectionSoon",
   "isCanvasSelectionInProgressFor",
@@ -102,13 +106,16 @@ assert(contentJs.includes("CANVAS_DOCUMENT_CLASS"), "Canvas document direction c
 assert(/function removeDirection\(element\) \{[\s\S]*?classList\.remove\([\s\S]*?CANVAS_DOCUMENT_CLASS/.test(contentJs), "removeDirection must remove Canvas document direction class");
 assert(contentJs.includes("canvasDocumentDirectionCache"), "Canvas document direction must use a cache");
 assert(contentJs.includes("const canvasSelectionInProgress = false") || contentJs.includes("let canvasSelectionInProgress = false"), "Canvas selection guard state must exist");
-assert(/function applyDirectionToCanvasDocumentBlock\(element\) \{[\s\S]*?directionForCanvasDocumentBlock[\s\S]*?applyDirection\(target, CANVAS_DOCUMENT_CLASS, direction\)[\s\S]*?applyInlineDirectionStyle\(target, direction\)/.test(contentJs), "Canvas document apply must be lightweight and idempotent");
+assert(/function currentCanvasSelectionBlock\(\) \{[\s\S]*?window\.getSelection[\s\S]*?selection\.isCollapsed[\s\S]*?canvasDocumentContainerFor/.test(contentJs), "active Canvas selection helper must use window.getSelection");
+assert(/function applyDirectionToCanvasDocumentBlock\(element\) \{[\s\S]*?isCanvasSelectionInProgressFor\(block\)[\s\S]*?return;[\s\S]*?applyDirection\(target, CANVAS_DOCUMENT_CLASS, direction\)[\s\S]*?applyInlineDirectionStyle\(target, direction\)/.test(contentJs), "Canvas document apply must skip writes while selection is active");
 assert(/function directionForCanvasDocumentBlock\(element\) \{[\s\S]*?canvasDocumentDirectionCache[\s\S]*?detectDirectionFromText/.test(contentJs), "Canvas direction detection must be cached");
 assert(/function getMessageTextTargets\(messageElement\) \{[\s\S]*?getCanvasDocumentBlocks\(messageElement\)[\s\S]*?!isInKnownCanvas\(element\)/.test(contentJs), "normal message prose processing must skip Canvas document blocks");
 assert(/function getTableDirectionTargets\(messageElement\) \{[\s\S]*?getCanvasDocumentBlocks\(messageElement\)[\s\S]*?!canvasBlocks\.some\(\(block\) => block\.contains\(tableElement\)\)/.test(contentJs), "table scans must skip Canvas document blocks");
 assert(/const canvasRoot = canvasDocumentContainerFor\(target\);[\s\S]*?scheduleCanvasDocumentApply\(canvasRoot\);[\s\S]*?continue;/.test(contentJs), "MutationObserver must have a Canvas-specific skip/lightweight path");
 assert(/const canvasRoot = canvasDocumentContainerFor\(target\);[\s\S]*?isCanvasSelectionInProgressFor\(canvasRoot\)[\s\S]*?continue;/.test(contentJs), "Canvas selection mutations must not trigger full document processing");
-assert(/document\.addEventListener\("pointerdown", begin, true\)[\s\S]*document\.addEventListener\("selectionchange", endKeyboardSelection, true\)/.test(contentJs), "Canvas selection guard listeners must be installed");
+assert(/function scheduleCanvasDocumentApply\(root\) \{[\s\S]*?hasActiveSelectionInsideCanvas\(root\)[\s\S]*?return;[\s\S]*?flushPendingCanvasDocumentAppliesWhenIdle/.test(contentJs), "Canvas apply scheduler must not flush while selection is active");
+assert(/document\.addEventListener\("pointerdown", begin, true\)[\s\S]*document\.addEventListener\("selectionchange", maintainSelectionGuard, true\)/.test(contentJs), "selectionchange must maintain the Canvas selection guard");
+assert(/document\.addEventListener\("beforecopy", guardCopy, true\)[\s\S]*document\.addEventListener\("copy", guardCopy, true\)[\s\S]*document\.addEventListener\("keydown", guardCopyShortcut, true\)/.test(contentJs), "copy-specific Canvas selection guard must be installed");
 assert(contentJs.includes("installCanvasSelectionGuard();"), "Canvas selection guard must be installed at startup");
 assert(/function applyDirectionToMessages\(root = document\) \{[\s\S]*?applyDirectionToCanvasDocuments\(messageElement\)[\s\S]*?getMessageTextTargets\(messageElement\)/.test(contentJs), "visible messages must apply Canvas direction before normal prose processing");
 assert(contentJs.includes('document.addEventListener("focusin", handleComposerFocus, true)'), "focusin handler must apply edit composer direction immediately");
