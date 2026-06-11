@@ -12,6 +12,7 @@ The extension applies the selected mode to messages already on the page and uses
 - **LTR** makes the composer and message prose left-to-right and left-aligned.
 - **Auto** detects the first strong Persian/Arabic/Hebrew or Latin character. Composer direction updates live, while each message independently receives its detected direction. Empty or ambiguous text defaults to RTL.
 - Formats user and assistant message prose, including existing and dynamically generated content, without forcing action bars or surrounding controls into a direction.
+- Keeps ChatGPT Canvas/document preview blocks native: the extension conservatively detects Canvas-like artifact/document-preview containers in assistant responses and skips their body, toolbar, controls, lists, paragraphs, tables, and code instead of applying direction attributes, classes, or inline direction styles.
 - Applies the selected direction to the main composer plus prompt-like edit and retry/regenerate input areas, including a full-document active-edit scan for ChatGPT edit boxes that appear outside the normal composer structure.
 - Uses CSS inline isolation for bold, italic, quote, link, and span content so mixed Persian-English prose is easier to read without mutating rendered message text or composer text.
 - Keeps code blocks, inline code, keyboard input, terminal-like output, math, and common syntax-highlighted/editor elements LTR and left-aligned; prose table layout follows RTL/LTR mode or header-detected Auto direction, while cells are detected independently so Persian, English, and mixed cells remain readable.
@@ -111,6 +112,51 @@ Load the unpacked extension, then verify the following on `https://chatgpt.com/`
 - [ ] ChatGPT controls remain visually normal after switching modes.
 - [ ] Repeat the relevant checks on `https://chat.openai.com/` if that host is available for the account.
 
+
+### Canvas/document preview checklist
+
+Canvas and document preview blocks are intentionally left native because ChatGPT already handles Persian and English direction inside them. When testing a chat that opens Canvas/document previews, verify:
+
+- [ ] Canvas/document preview opens normally.
+- [ ] Canvas scroll is smooth.
+- [ ] Auto mode: Canvas scroll remains smooth.
+- [ ] Selecting part of Canvas text is smooth.
+- [ ] Auto mode: selecting Canvas text causes no lag.
+- [ ] Copying selected Canvas text works.
+- [ ] Auto mode: message starts with Persian text and contains an English Canvas/document preview; Canvas remains native/LTR.
+- [ ] Assistant response starts with Persian text, then includes Persian Canvas: Canvas remains native/correct.
+- [ ] Auto mode does not force Canvas RTL because of surrounding Persian text.
+- [ ] Auto mode: Persian Canvas and English Canvas both remain native.
+- [ ] Persian and English inside Canvas remain native/correct.
+- [ ] Normal non-Canvas Persian/English messages still get extension direction handling.
+- [ ] Main composer still works.
+- [ ] Edit mode still works.
+- [ ] Response-change popup still works.
+- [ ] RTL/LTR modes do not write inside Canvas.
+- [ ] Tables outside Canvas still work.
+- [ ] Code blocks remain LTR.
+- [ ] Long chats remain responsive in Auto mode.
+
+### Canvas detection debug checklist
+
+On a failing Canvas/document preview message, select text inside Canvas, then run this from the page DevTools Console:
+
+```js
+document.documentElement.dataset.cgptRtlDebug = "1";
+document.dispatchEvent(new Event("cgpt-rtl-debug-enable"));
+document.dispatchEvent(new Event("cgpt-rtl-inspect-canvas"));
+JSON.parse(document.documentElement.dataset.cgptRtlCanvasDebugResult);
+```
+
+Verify:
+
+- [ ] `messageContainsCanvasDocument` is `true` for the assistant message/article that contains Canvas.
+- [ ] `hasCanvasContainer` is `true` for the selected Canvas text.
+- [ ] `selectedInsideCanvasDocumentBlock` is `true` for the selected Canvas text.
+- [ ] In Auto mode, `cgptAppliedCount` inside that Canvas-containing message is `0`, or any existing extension-applied state no longer affects the Canvas-containing message.
+- [ ] English Canvas content remains native/LTR.
+- [ ] Text selection inside Canvas has no lag.
+- [ ] Normal messages without Canvas still get Auto direction handling.
 
 ## Performance checklist
 

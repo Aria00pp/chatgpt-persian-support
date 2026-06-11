@@ -101,6 +101,26 @@
     "dl"
   ].join(",");
 
+
+  const CANVAS_DOCUMENT_SIGNAL_SELECTOR = [
+    "[data-testid*='canvas' i]",
+    "[data-testid*='artifact' i]",
+    "[data-testid*='document-preview' i]",
+    "[data-testid*='doc-preview' i]",
+    "[data-testid*='documentPreview' i]",
+    "[aria-label*='canvas' i]",
+    "[aria-label*='artifact' i]",
+    "[aria-label*='document preview' i]",
+    "[class*='canvas' i]",
+    "[class*='artifact' i]",
+    "[class*='document-preview' i]",
+    "[class*='documentPreview' i]"
+  ].join(",");
+
+  const CANVAS_DOCUMENT_TOOLBAR_CONTROL_RE = /\b(edit|copy|download|expand|open|fullscreen|preview)\b|ویرایش|کپی|دانلود|گسترش/i;
+  const CANVAS_DOCUMENT_STRONG_SIGNAL_RE = /\b(canvas|artifact|document[-_\s]*preview|doc[-_\s]*preview)\b/i;
+  const CANVAS_DOCUMENT_WEAK_SIGNAL_RE = /\b(document|preview)\b/i;
+
   const CONTROL_AREA_SELECTOR = [
     "button",
     "[role='button']",
@@ -218,6 +238,7 @@
   let perfStats = null;
   const messageDirectionQueue = new Set();
   const observedMessages = new WeakSet();
+  const structuralCanvasDocumentBlocks = new WeakSet();
 
   function elementsMatching(root, selector, includeClosest = false) {
     const matches = new Set();
@@ -239,6 +260,338 @@
       for (const element of root.querySelectorAll(selector)) {
         matches.add(element);
       }
+    }
+
+    return matches;
+  }
+
+
+  function elementHintText(element) {
+    if (!(element instanceof Element)) {
+      return "";
+    }
+
+    return [
+      element.id,
+      element.className && typeof element.className === "string" ? element.className : "",
+      element.getAttribute("aria-label"),
+      element.getAttribute("data-testid"),
+      element.getAttribute("role"),
+      element.getAttribute("title")
+    ].filter(Boolean).join(" ").toLowerCase();
+  }
+
+  function isInAssistantResponseArea(element) {
+    const response = element.closest("[data-message-author-role='assistant'], main article");
+    return Boolean(response && !response.closest("nav, aside, header, footer, [role='dialog'], [aria-modal='true']"));
+  }
+
+  function hasCanvasDocumentToolbarSignals(container) {
+    if (!(container instanceof Element)) {
+      return false;
+    }
+
+    const controls = [...container.querySelectorAll("[role='toolbar'], button, [role='button'], a[download], [aria-label], [data-testid]")]
+      .slice(0, 40);
+    let matchedControls = 0;
+    let hasEditControl = false;
+    let hasDocumentActionControl = false;
+
+    for (const control of controls) {
+      const hint = [elementHintText(control), control.textContent || ""].join(" ");
+      if (!CANVAS_DOCUMENT_TOOLBAR_CONTROL_RE.test(hint)) {
+        continue;
+      }
+
+      matchedControls += 1;
+      hasEditControl = hasEditControl || /\bedit\b|ویرایش/i.test(hint);
+      hasDocumentActionControl = hasDocumentActionControl || /\b(copy|download|expand|open|fullscreen|preview)\b|کپی|دانلود|گسترش/i.test(hint);
+    }
+
+    return matchedControls >= 3 || (hasEditControl && hasDocumentActionControl);
+  }
+
+
+  function isNormalMessageProseElement(element) {
+    return Boolean(element instanceof Element && (
+      element.matches(MESSAGE_PROSE_SELECTOR) ||
+      element.matches(MESSAGE_TEXT_BLOCK_SELECTOR) ||
+      element.matches(`${TECHNICAL_SELECTOR}, table`) ||
+      element.closest(`${COMPOSER_SELECTOR}, ${RESPONSE_CHANGE_MENU_SELECTOR}, nav, aside, header, footer, [role='dialog'], [aria-modal='true'], [role='menu'], [role='listbox']`)
+    ));
+  }
+
+  function hasDocumentLikeScrollableRegion(element) {
+    const candidates = [element, ...[...element.querySelectorAll("[class*='overflow' i], [style*='overflow'], [role='document'], [role='region']")].slice(0, 12)];
+    return candidates.some((candidate) => (
+      candidate instanceof Element &&
+      (candidate.getAttribute("role") === "document" || candidate.getAttribute("role") === "region" || candidate.scrollHeight > candidate.clientHeight + 80)
+    ));
+  }
+
+  function hasDocumentLikeStructure(element) {
+    const textBlocks = element.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, code, table").length;
+    const panelHint = /\b(overflow|rounded|border|shadow|preview|document|editor|viewer|modal|sheet|panel|card)\b/i.test(elementHintText(element));
+    return textBlocks >= 2 || panelHint || hasDocumentLikeScrollableRegion(element);
+  }
+
+  function structuralCanvasControlScore(element) {
+    const controls = [...element.querySelectorAll("[role='toolbar'], button, [role='button'], a, [aria-label], [title]")].slice(0, 30);
+    let labeledControls = 0;
+    let iconControls = 0;
+
+    for (const control of controls) {
+      const hint = [elementHintText(control), control.textContent || ""].join(" ");
+      if (CANVAS_DOCUMENT_TOOLBAR_CONTROL_RE.test(hint)) {
+        labeledControls += 1;
+      }
+      if (control.matches("button, [role='button'], a") && (control.querySelector("svg") || previewText(control.textContent, 20).length <= 2)) {
+        iconControls += 1;
+      }
+    }
+
+    return labeledControls * 2 + Math.min(iconControls, 3);
+  }
+
+  function isStructuralCanvasDocumentBlock(element) {
+    if (element instanceof Element && structuralCanvasDocumentBlocks.has(element)) {
+      return true;
+    }
+
+    if (!(element instanceof Element) || !isInAssistantResponseArea(element)) {
+      return false;
+    }
+
+    const message = element.closest(MESSAGE_SELECTOR);
+    if (!message || element === message || isNormalMessageProseElement(element)) {
+      return false;
+    }
+
+    const text = previewText(element.textContent, 1200);
+    if (text.length < 80) {
+      return false;
+    }
+
+    const controlScore = structuralCanvasControlScore(element);
+    if (controlScore < 2) {
+      return false;
+    }
+
+    let score = controlScore;
+    if (hasDocumentLikeStructure(element)) {
+      score += 2;
+    }
+    if (element.children.length >= 2) {
+      score += 1;
+    }
+    if (!element.closest(MESSAGE_PROSE_SELECTOR)) {
+      score += 1;
+    }
+
+    const detected = score >= 4;
+    if (detected) {
+      structuralCanvasDocumentBlocks.add(element);
+    }
+    return detected;
+  }
+
+  function structuralCanvasCandidatesFor(messageElement) {
+    if (!(messageElement instanceof Element)) {
+      return [];
+    }
+
+    const candidates = [];
+    const add = (element) => {
+      if (element instanceof Element && element !== messageElement && !candidates.includes(element)) {
+        candidates.push(element);
+      }
+    };
+
+    for (const child of [...messageElement.children].slice(0, 16)) {
+      add(child);
+      for (const grandchild of [...child.children].slice(0, 12)) {
+        add(grandchild);
+        for (const greatGrandchild of [...grandchild.children].slice(0, 8)) {
+          add(greatGrandchild);
+        }
+      }
+    }
+
+    for (const element of [...messageElement.querySelectorAll("section, article, [role='region'], [role='document'], [role='group'], [class*='overflow' i], [class*='rounded' i], [class*='border' i], [class*='shadow' i]")].slice(0, 48)) {
+      add(element);
+    }
+
+    return candidates.slice(0, 80);
+  }
+
+  function isCanvasDocumentBlock(element) {
+    if (!(element instanceof Element) || !isInAssistantResponseArea(element)) {
+      return false;
+    }
+
+    const hint = elementHintText(element);
+    if (CANVAS_DOCUMENT_STRONG_SIGNAL_RE.test(hint)) {
+      return true;
+    }
+
+    if (isStructuralCanvasDocumentBlock(element)) {
+      return true;
+    }
+
+    if (!CANVAS_DOCUMENT_WEAK_SIGNAL_RE.test(hint)) {
+      return false;
+    }
+
+    return hasCanvasDocumentToolbarSignals(element);
+  }
+
+  function canvasDocumentContainerFor(element) {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    let current = element;
+    for (let depth = 0; current && depth < 14; depth += 1) {
+      if (isCanvasDocumentBlock(current)) {
+        return current;
+      }
+
+      if (current.matches("nav, aside, header, footer, [role='dialog'], [aria-modal='true']")) {
+        return null;
+      }
+
+      current = current.parentElement;
+    }
+
+    const closestSignaled = element.closest(CANVAS_DOCUMENT_SIGNAL_SELECTOR);
+    return closestSignaled && isCanvasDocumentBlock(closestSignaled) ? closestSignaled : null;
+  }
+
+  function isInsideCanvasDocumentBlock(element) {
+    return Boolean(canvasDocumentContainerFor(element));
+  }
+
+  function containsCanvasDocumentBlock(element) {
+    if (!(element instanceof Element)) {
+      return false;
+    }
+
+    for (const candidate of element.querySelectorAll(CANVAS_DOCUMENT_SIGNAL_SELECTOR)) {
+      if (candidate !== element && isCanvasDocumentBlock(candidate)) {
+        return true;
+      }
+    }
+
+    for (const candidate of structuralCanvasCandidatesFor(element)) {
+      if (isStructuralCanvasDocumentBlock(candidate)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function isCanvasDirectionBoundary(element) {
+    return Boolean(element instanceof Element && (
+      isCanvasDocumentBlock(element) ||
+      isInsideCanvasDocumentBlock(element) ||
+      containsCanvasDocumentBlock(element)
+    ));
+  }
+
+  function shouldSkipDirectionTargetBecauseItAffectsCanvas(element) {
+    return isCanvasDirectionBoundary(element);
+  }
+
+  function messageContainsCanvasDocument(messageElement) {
+    if (!(messageElement instanceof Element)) {
+      return false;
+    }
+
+    if (isCanvasDocumentBlock(messageElement) || containsCanvasDocumentBlock(messageElement)) {
+      return true;
+    }
+
+    const signaledDescendant = messageElement.querySelector(CANVAS_DOCUMENT_SIGNAL_SELECTOR);
+    if (signaledDescendant && !signaledDescendant.closest("nav, aside, header, footer, [role='menu'], [role='listbox']")) {
+      return true;
+    }
+
+    for (const candidate of structuralCanvasCandidatesFor(messageElement)) {
+      if (isStructuralCanvasDocumentBlock(candidate)) {
+        return true;
+      }
+    }
+
+    return hasCanvasDocumentToolbarSignals(messageElement);
+  }
+
+  function shouldSkipAutoMessageBecauseItContainsCanvas(messageElement) {
+    return selectedMode === "auto" && messageContainsCanvasDocument(messageElement);
+  }
+
+  function cleanupCanvasDirectionAncestors(root = document) {
+    const appliedSelector = [`.${APPLIED_CLASS}`, ...LEGACY_CLASSES.map((name) => `.${name}`)].join(",");
+    const scope = root instanceof Element || root === document ? root : document;
+    for (const element of scope.querySelectorAll(appliedSelector)) {
+      if (isCanvasDocumentBlock(element) || isInsideCanvasDocumentBlock(element)) {
+        continue;
+      }
+
+      if (containsCanvasDocumentBlock(element)) {
+        removeDirection(element);
+      }
+    }
+  }
+
+  function collectElementsOutsideCanvas(root, selector) {
+    const matches = [];
+    const add = (element) => {
+      if (!isCanvasDocumentBlock(element) && !isInsideCanvasDocumentBlock(element) && element.matches(selector)) {
+        matches.push(element);
+      }
+    };
+
+    if (root instanceof Element) {
+      if (isCanvasDocumentBlock(root) || isInsideCanvasDocumentBlock(root)) {
+        return matches;
+      }
+      add(root);
+    }
+
+    if (root && typeof root.querySelectorAll === "function") {
+      for (const element of root.querySelectorAll(selector)) {
+        if (!isCanvasDocumentBlock(element) && !isInsideCanvasDocumentBlock(element)) {
+          matches.push(element);
+        }
+      }
+    }
+
+    return matches;
+  }
+
+  function elementsMatchingOutsideCanvas(root, selector, includeClosest = false) {
+    const matches = new Set();
+
+    if (root instanceof Element) {
+      if (isCanvasDocumentBlock(root) || isInsideCanvasDocumentBlock(root)) {
+        return matches;
+      }
+
+      if (root.matches(selector)) {
+        matches.add(root);
+      }
+
+      if (includeClosest) {
+        const closest = root.closest(selector);
+        if (closest && !isCanvasDocumentBlock(closest) && !isInsideCanvasDocumentBlock(closest)) {
+          matches.add(closest);
+        }
+      }
+    }
+
+    for (const element of collectElementsOutsideCanvas(root, selector)) {
+      matches.add(element);
     }
 
     return matches;
@@ -778,6 +1131,53 @@
     debugEditableContext(editable, "manual", true);
   }
 
+  function selectedElementForDebug() {
+    const selection = window.getSelection ? window.getSelection() : null;
+    const node = selection && selection.rangeCount > 0 ? selection.anchorNode : null;
+    if (node instanceof Element) {
+      return node;
+    }
+    if (node && node.parentElement) {
+      return node.parentElement;
+    }
+    return document.activeElement instanceof Element ? document.activeElement : null;
+  }
+
+  function inspectCanvasDetectionContext() {
+    if (!isDebugEnabled()) {
+      return;
+    }
+
+    const selectedElement = selectedElementForDebug();
+    const message = selectedElement ? selectedElement.closest(MESSAGE_SELECTOR) : null;
+    const canvasContainer = selectedElement ? canvasDocumentContainerFor(selectedElement) : null;
+    const appliedSelector = [`.${APPLIED_CLASS}`, ...LEGACY_CLASSES.map((name) => `.${name}`)].join(",");
+    const appliedElements = message ? [...message.querySelectorAll(appliedSelector)] : [];
+    const messageHasCanvas = messageContainsCanvasDocument(message);
+    const selectedInsideCanvas = selectedElement ? isInsideCanvasDocumentBlock(selectedElement) : false;
+    const summary = {
+      selectedMode,
+      messageContainsCanvasDocument: messageHasCanvas,
+      hasCanvasContainer: Boolean(canvasContainer),
+      selectedInsideCanvasDocumentBlock: selectedInsideCanvas,
+      cgptAppliedCount: appliedElements.length
+    };
+    const diagnostic = {
+      ...summary,
+      selectedElement: elementSummary(selectedElement),
+      message: elementSummary(message),
+      canvasContainer: elementSummary(canvasContainer),
+      cgptAppliedElements: appliedElements.slice(0, 12).map((element) => elementSummary(element, false)),
+      messageTextPreview: previewText(message && message.textContent, 500)
+    };
+
+    if (document.documentElement) {
+      document.documentElement.dataset.cgptRtlCanvasDebugResult = JSON.stringify(summary);
+    }
+    document.dispatchEvent(new CustomEvent("cgpt-rtl-canvas-debug-result", { detail: diagnostic }));
+    console.info("[ChatGPT Persian Direction] Canvas detection debug", diagnostic);
+  }
+
   function handleDebugEvent(event) {
     if (event.type === "cgpt-rtl-debug-enable") {
       debugEnabled = true;
@@ -786,10 +1186,13 @@
       debugEnabled = false;
       if (document.documentElement) {
         delete document.documentElement.dataset.cgptRtlDebug;
+        delete document.documentElement.dataset.cgptRtlCanvasDebugResult;
       }
       console.info("[ChatGPT Persian Direction] debug disabled");
     } else if (event.type === "cgpt-rtl-inspect-active") {
       inspectActiveEditableContext();
+    } else if (event.type === "cgpt-rtl-inspect-canvas") {
+      inspectCanvasDetectionContext();
     }
   }
 
@@ -797,6 +1200,7 @@
     document.addEventListener("cgpt-rtl-debug-enable", handleDebugEvent);
     document.addEventListener("cgpt-rtl-debug-disable", handleDebugEvent);
     document.addEventListener("cgpt-rtl-inspect-active", handleDebugEvent);
+    document.addEventListener("cgpt-rtl-inspect-canvas", handleDebugEvent);
   }
   function getComposerContainer(element) {
     if (isExcludedUiArea(element)) {
@@ -981,26 +1385,31 @@
   }
 
   function getMessageTextTargets(messageElement) {
-    const proseTargets = [...messageElement.querySelectorAll(MESSAGE_PROSE_SELECTOR)]
-      .filter((element) => !element.closest(`${CONTROL_AREA_SELECTOR}, ${COMPOSER_SELECTOR}`));
+    if (!(messageElement instanceof Element) || isCanvasDocumentBlock(messageElement) || isInsideCanvasDocumentBlock(messageElement) || shouldSkipAutoMessageBecauseItContainsCanvas(messageElement)) {
+      return [];
+    }
+
+    const proseTargets = collectElementsOutsideCanvas(messageElement, MESSAGE_PROSE_SELECTOR)
+      .filter((element) => !element.closest(`${CONTROL_AREA_SELECTOR}, ${COMPOSER_SELECTOR}`) && !shouldSkipDirectionTargetBecauseItAffectsCanvas(element));
 
     if (proseTargets.length > 0) {
       return topLevelTargets(proseTargets);
     }
 
-    const messageIdTargets = [...messageElement.querySelectorAll("[data-message-id]")]
+    const messageIdTargets = collectElementsOutsideCanvas(messageElement, "[data-message-id]")
       .filter((element) => (
-        element.querySelector(MESSAGE_TEXT_BLOCK_SELECTOR) &&
-        !element.querySelector(CONTROL_AREA_SELECTOR) &&
-        !element.querySelector(COMPOSER_SELECTOR)
+        !shouldSkipDirectionTargetBecauseItAffectsCanvas(element) &&
+        collectElementsOutsideCanvas(element, MESSAGE_TEXT_BLOCK_SELECTOR).length > 0 &&
+        !collectElementsOutsideCanvas(element, CONTROL_AREA_SELECTOR).length &&
+        !collectElementsOutsideCanvas(element, COMPOSER_SELECTOR).length
       ));
 
     if (messageIdTargets.length > 0) {
       return topLevelTargets(messageIdTargets);
     }
 
-    const textBlockTargets = [...messageElement.querySelectorAll(MESSAGE_TEXT_BLOCK_SELECTOR)]
-      .filter((element) => !element.closest(`${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, [role='toolbar'], [role='menu']`));
+    const textBlockTargets = collectElementsOutsideCanvas(messageElement, MESSAGE_TEXT_BLOCK_SELECTOR)
+      .filter((element) => !element.closest(`${TECHNICAL_SELECTOR}, ${COMPOSER_SELECTOR}, [role='toolbar'], [role='menu']`) && !shouldSkipDirectionTargetBecauseItAffectsCanvas(element));
 
     if (textBlockTargets.length > 0) {
       return topLevelTargets(textBlockTargets);
@@ -1010,7 +1419,10 @@
       ? messageElement
       : messageElement.querySelector("[data-message-author-role='user'], [data-message-author-role='assistant']");
 
-    return [authorRoleTarget || messageElement];
+    const fallbackTarget = authorRoleTarget || messageElement;
+    return fallbackTarget && !shouldSkipDirectionTargetBecauseItAffectsCanvas(fallbackTarget)
+      ? [fallbackTarget]
+      : [];
   }
 
   function isTableElement(element) {
@@ -1018,12 +1430,20 @@
   }
 
   function getTableDirectionTargets(messageElement) {
-    return [...messageElement.querySelectorAll("table")]
+    if (!(messageElement instanceof Element) || isCanvasDocumentBlock(messageElement) || isInsideCanvasDocumentBlock(messageElement) || shouldSkipAutoMessageBecauseItContainsCanvas(messageElement)) {
+      return [];
+    }
+
+    return collectElementsOutsideCanvas(messageElement, "table")
       .filter((tableElement) => shouldDirectionManageTable(tableElement));
   }
 
   function shouldDirectionManageTable(tableElement) {
     if (!isTableElement(tableElement)) {
+      return false;
+    }
+
+    if (isCanvasDocumentBlock(tableElement) || isInsideCanvasDocumentBlock(tableElement)) {
       return false;
     }
 
@@ -1094,7 +1514,10 @@
 
     const layoutDirection = directionForTableLayout(tableElement);
     applyStableDirectionToTable(tableElement, layoutDirection);
-    for (const cellElement of tableElement.querySelectorAll("th, td")) {
+    for (const cellElement of collectElementsOutsideCanvas(tableElement, "th, td")) {
+      if (isInsideCanvasDocumentBlock(cellElement)) {
+        continue;
+      }
       if (perfStats) {
         perfStats.cells += 1;
       }
@@ -1300,6 +1723,10 @@
   }
 
   function applyDirection(element, kind, forcedDirection = null) {
+    if (element instanceof Element && shouldSkipDirectionTargetBecauseItAffectsCanvas(element)) {
+      return forcedDirection || selectedMode;
+    }
+
     const direction = forcedDirection || directionFor(element, kind);
     const desiredClasses = [APPLIED_CLASS, kind, `cgpt-dir-${selectedMode}`, `cgpt-dir-${direction}`];
     const currentDir = element.getAttribute("dir");
@@ -1338,6 +1765,10 @@
   }
 
   function applyInlineDirectionStyle(element, direction) {
+    if (element instanceof Element && shouldSkipDirectionTargetBecauseItAffectsCanvas(element)) {
+      return;
+    }
+
     const textAlign = direction === "rtl" ? "right" : "left";
     if (element.style.direction === direction && element.style.textAlign === textAlign && element.style.unicodeBidi === "isolate") {
       if (perfStats) {
@@ -1362,6 +1793,18 @@
     }
     if (element.style.unicodeBidi !== "isolate") {
       element.style.unicodeBidi = "isolate";
+    }
+  }
+
+  function clearExtensionInlineDirectionStyle(element) {
+    if (element.style.direction === "rtl" || element.style.direction === "ltr") {
+      element.style.direction = "";
+    }
+    if (element.style.textAlign === "right" || element.style.textAlign === "left") {
+      element.style.textAlign = "";
+    }
+    if (element.style.unicodeBidi === "isolate") {
+      element.style.unicodeBidi = "";
     }
   }
 
@@ -1391,7 +1834,7 @@
         ].join(",")
       : `${CONTROL_AREA_SELECTOR}, ${EDIT_COMPOSER_EXCLUDED_SELECTOR}, .${CONTROL_CLASS}`;
 
-    return Boolean(element.closest(excludedSelector));
+    return Boolean(element.closest(excludedSelector) || isCanvasDocumentBlock(element) || isInsideCanvasDocumentBlock(element));
   }
   function getEditingHost(element) {
     if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
@@ -1482,6 +1925,9 @@
 
   function getEditableDirectionTargets(element) {
     const targets = new Set();
+    if (isCanvasDocumentBlock(element) || isInsideCanvasDocumentBlock(element)) {
+      return targets;
+    }
     if (element.matches(EDITABLE_DIRECTION_TARGET_SELECTOR)) {
       targets.add(element);
     }
@@ -1511,7 +1957,7 @@
   }
 
   function applyDirectionToActiveEditables(root = document) {
-    for (const element of elementsMatching(root, COMPOSER_SELECTOR, true)) {
+    for (const element of elementsMatchingOutsideCanvas(root, COMPOSER_SELECTOR, true)) {
       if (isActiveEditableComposer(element)) {
         const direction = applyDirection(element, COMPOSER_CLASS);
         applyDirectionToEditableTree(element, direction);
@@ -1524,7 +1970,7 @@
       ? responseChangeMenuContainerFor(document.activeElement)
       : null;
 
-    for (const element of elementsMatching(root, RESPONSE_CHANGE_MENU_SELECTOR, true)) {
+    for (const element of elementsMatchingOutsideCanvas(root, RESPONSE_CHANGE_MENU_SELECTOR, true)) {
       if (isFocusedResponseChangeMenu(element)) {
         applyDirectionToResponseChangeMenu(element);
       }
@@ -1536,10 +1982,18 @@
   }
 
   function removeDirection(element) {
+    if (element instanceof Element && (isCanvasDocumentBlock(element) || isInsideCanvasDocumentBlock(element))) {
+      return;
+    }
+
     const hadDirectionClass = element.classList.contains(APPLIED_CLASS) ||
       LEGACY_CLASSES.some((className) => element.classList.contains(className));
 
-    restoreInlineDirectionStyle(element);
+    if (originalInlineStyles.has(element)) {
+      restoreInlineDirectionStyle(element);
+    } else if (hadDirectionClass && containsCanvasDocumentBlock(element)) {
+      clearExtensionInlineDirectionStyle(element);
+    }
     element.classList.remove(APPLIED_CLASS, COMPOSER_CLASS, MESSAGE_CLASS, TABLE_CLASS, TABLE_CELL_CLASS, ...DIRECTION_CLASSES, ...LEGACY_CLASSES);
     if (hadDirectionClass && originalDirections.has(element)) {
       const originalDirection = originalDirections.get(element);
@@ -1555,7 +2009,7 @@
   }
 
   function applyDirectionToComposer(root = document) {
-    for (const element of elementsMatching(root, COMPOSER_SELECTOR, true)) {
+    for (const element of elementsMatchingOutsideCanvas(root, COMPOSER_SELECTOR, true)) {
       if (isComposerElement(element)) {
         const direction = applyDirection(element, COMPOSER_CLASS);
         applyDirectionToEditableTree(element, direction);
@@ -1564,8 +2018,12 @@
   }
 
   function applyDirectionToMessages(root = document) {
-    for (const messageElement of elementsMatching(root, MESSAGE_SELECTOR, true)) {
-      if (!isMessageElement(messageElement)) {
+    if (shouldSkipAutoMessageBecauseItContainsCanvas(root)) {
+      return;
+    }
+
+    for (const messageElement of elementsMatchingOutsideCanvas(root, MESSAGE_SELECTOR, true)) {
+      if (!isMessageElement(messageElement) || shouldSkipAutoMessageBecauseItContainsCanvas(messageElement)) {
         continue;
       }
 
@@ -1664,14 +2122,14 @@
       }
     }
 
-    for (const message of document.querySelectorAll(MESSAGE_SELECTOR)) {
-      if (isMessageElement(message)) {
+    for (const message of elementsMatchingOutsideCanvas(document, MESSAGE_SELECTOR, true)) {
+      if (isMessageElement(message) && !shouldSkipAutoMessageBecauseItContainsCanvas(message)) {
         for (const target of getMessageTextTargets(message)) {
           currentTargets.add(target);
         }
         for (const tableElement of getTableDirectionTargets(message)) {
           currentTargets.add(tableElement);
-          for (const cellElement of tableElement.querySelectorAll("th, td")) {
+          for (const cellElement of collectElementsOutsideCanvas(tableElement, "th, td")) {
             currentTargets.add(cellElement);
           }
         }
@@ -1680,6 +2138,9 @@
 
     const appliedSelector = [`.${APPLIED_CLASS}`, ...LEGACY_CLASSES.map((name) => `.${name}`)].join(",");
     for (const element of document.querySelectorAll(appliedSelector)) {
+      if (isCanvasDocumentBlock(element) || isInsideCanvasDocumentBlock(element)) {
+        continue;
+      }
       if (!currentTargets.has(element)) {
         removeDirection(element);
       }
@@ -1759,7 +2220,7 @@
   }
 
   function observeMessageForLazyDirection(messageElement) {
-    if (!(messageElement instanceof Element) || !isMessageElement(messageElement) || observedMessages.has(messageElement)) {
+    if (!(messageElement instanceof Element) || !isMessageElement(messageElement) || observedMessages.has(messageElement) || isCanvasDocumentBlock(messageElement) || isInsideCanvasDocumentBlock(messageElement) || shouldSkipAutoMessageBecauseItContainsCanvas(messageElement)) {
       return;
     }
 
@@ -1779,13 +2240,13 @@
 
   function refreshObservedMessages(root = document) {
     setupMessageIntersectionObserver();
-    for (const messageElement of elementsMatching(root, MESSAGE_SELECTOR, true)) {
+    for (const messageElement of elementsMatchingOutsideCanvas(root, MESSAGE_SELECTOR, true)) {
       observeMessageForLazyDirection(messageElement);
     }
   }
 
   function enqueueMessageForDirection(messageElement) {
-    if (!(messageElement instanceof Element) || !messageElement.isConnected || !isMessageElement(messageElement)) {
+    if (!(messageElement instanceof Element) || !messageElement.isConnected || !isMessageElement(messageElement) || isCanvasDocumentBlock(messageElement) || isInsideCanvasDocumentBlock(messageElement) || shouldSkipAutoMessageBecauseItContainsCanvas(messageElement)) {
       return;
     }
 
@@ -1810,7 +2271,7 @@
       let processed = 0;
       for (const messageElement of [...messageDirectionQueue]) {
         messageDirectionQueue.delete(messageElement);
-        if (!messageElement.isConnected) {
+        if (!messageElement.isConnected || isCanvasDocumentBlock(messageElement) || isInsideCanvasDocumentBlock(messageElement) || shouldSkipAutoMessageBecauseItContainsCanvas(messageElement)) {
           continue;
         }
 
@@ -1840,9 +2301,13 @@
   }
 
   function applyDirectionToVisibleMessages(root = document) {
+    if (shouldSkipAutoMessageBecauseItContainsCanvas(root)) {
+      return undefined;
+    }
+
     return withPerfStats("visible message refresh", () => {
       refreshObservedMessages(root);
-      for (const messageElement of elementsMatching(root, MESSAGE_SELECTOR, true)) {
+      for (const messageElement of elementsMatchingOutsideCanvas(root, MESSAGE_SELECTOR, true)) {
         if (isMessageNearViewport(messageElement)) {
           enqueueMessageForDirection(messageElement);
         } else if (perfStats) {
@@ -1895,6 +2360,10 @@
   }
 
   function scheduleApply(root = document, options = {}) {
+    if (root instanceof Element && (isCanvasDocumentBlock(root) || isInsideCanvasDocumentBlock(root) || shouldSkipAutoMessageBecauseItContainsCanvas(root.closest(MESSAGE_SELECTOR) || root))) {
+      return;
+    }
+
     const fullScan = Boolean(options.fullScan) || root === document || root === document.documentElement;
     if (fullScan) {
       fullScanScheduled = true;
@@ -1935,10 +2404,57 @@
     });
   }
 
-  function saveMode() {
-    if (chrome.storage && chrome.storage.local) {
-      chrome.storage.local.set({ [STORAGE_KEY]: selectedMode });
+  function safeStorageArea() {
+    try {
+      const chromeApi = globalThis.chrome;
+      if (!chromeApi || !chromeApi.runtime || !chromeApi.runtime.id || !chromeApi.storage || !chromeApi.storage.local) {
+        return null;
+      }
+      return chromeApi.storage.local;
+    } catch (_error) {
+      return null;
     }
+  }
+
+  function safeStorageSet(value) {
+    const storage = safeStorageArea();
+    if (!storage) {
+      return;
+    }
+
+    try {
+      storage.set({ [STORAGE_KEY]: value }, () => {
+        const runtime = globalThis.chrome && globalThis.chrome.runtime;
+        void (runtime && runtime.lastError);
+      });
+    } catch (_error) {
+      // Ignore stale extension contexts after reload/update.
+    }
+  }
+
+  function safeStorageGet(key, callback) {
+    const storage = safeStorageArea();
+    if (!storage) {
+      callback(null);
+      return;
+    }
+
+    try {
+      storage.get(key, (stored) => {
+        const runtime = globalThis.chrome && globalThis.chrome.runtime;
+        if (runtime && runtime.lastError) {
+          callback(null);
+          return;
+        }
+        callback(stored || null);
+      });
+    } catch (_error) {
+      callback(null);
+    }
+  }
+
+  function saveMode() {
+    safeStorageSet(selectedMode);
   }
 
   function setMode(mode, persist = true) {
@@ -1953,6 +2469,7 @@
 
     updateControlState();
     messageDirectionQueue.clear();
+    cleanupCanvasDirectionAncestors(document);
     applyInteractiveDirections(document);
     refreshObservedMessages(document);
     applyDirectionToVisibleMessages(document);
@@ -1960,13 +2477,7 @@
   }
 
   function loadMode() {
-    if (!chrome.storage || !chrome.storage.local) {
-      applyInteractiveDirections(document);
-      applyDirectionToVisibleMessages(document);
-      return;
-    }
-
-    chrome.storage.local.get(STORAGE_KEY, (stored) => {
+    safeStorageGet(STORAGE_KEY, (stored) => {
       const storedMode = stored && stored[STORAGE_KEY];
       setMode(MODES.includes(storedMode) ? storedMode : DEFAULT_MODE, false);
     });
@@ -1974,6 +2485,10 @@
 
   function handleComposerInput(event) {
     const target = event.target instanceof Element ? event.target : null;
+    if (target && (isCanvasDocumentBlock(target) || isInsideCanvasDocumentBlock(target))) {
+      return;
+    }
+
     const composer = target ? target.closest(COMPOSER_SELECTOR) : null;
     const menu = target ? responseChangeMenuContainerFor(target) : null;
     if (composer) {
@@ -1991,6 +2506,10 @@
 
   function handleComposerFocus(event) {
     const target = event.target instanceof Element ? event.target : null;
+    if (target && (isCanvasDocumentBlock(target) || isInsideCanvasDocumentBlock(target))) {
+      return;
+    }
+
     const composer = target ? target.closest(COMPOSER_SELECTOR) : null;
     const menu = target ? responseChangeMenuContainerFor(target) : null;
     if (composer) {
@@ -2024,6 +2543,10 @@
 
   function handleKeyboardShortcut(event) {
     const target = event.target instanceof Element ? event.target : null;
+    if (target && (isCanvasDocumentBlock(target) || isInsideCanvasDocumentBlock(target))) {
+      return;
+    }
+
     const composer = target ? target.closest(COMPOSER_SELECTOR) : null;
     const menu = target ? responseChangeMenuContainerFor(target) : null;
     const focusedResponseMenu = menu && isFocusedResponseChangeMenu(menu);
@@ -2064,9 +2587,30 @@
           continue;
         }
 
-        const addedElementCount = [...mutation.addedNodes].filter((node) => node instanceof Element).length;
-        const addedLargeSubtree = [...mutation.addedNodes].some((node) => (
-          node instanceof Element && node.querySelectorAll && node.querySelectorAll(`${MESSAGE_SELECTOR}, ${COMPOSER_SELECTOR}, table`).length > 4
+        if (isCanvasDocumentBlock(target) || isInsideCanvasDocumentBlock(target)) {
+          continue;
+        }
+
+        const messageContainer = target.closest(MESSAGE_SELECTOR);
+        if (messageContainer && shouldSkipAutoMessageBecauseItContainsCanvas(messageContainer)) {
+          continue;
+        }
+
+        const addedElementsOutsideCanvas = [...mutation.addedNodes].filter((node) => {
+          if (!(node instanceof Element) || isCanvasDocumentBlock(node) || isInsideCanvasDocumentBlock(node)) {
+            return false;
+          }
+
+          const addedMessage = node.matches(MESSAGE_SELECTOR) ? node : node.closest(MESSAGE_SELECTOR);
+          return !(addedMessage && shouldSkipAutoMessageBecauseItContainsCanvas(addedMessage));
+        });
+        if (mutation.addedNodes.length > 0 && addedElementsOutsideCanvas.length === 0) {
+          continue;
+        }
+
+        const addedElementCount = addedElementsOutsideCanvas.length;
+        const addedLargeSubtree = addedElementsOutsideCanvas.some((node) => (
+          node.querySelectorAll && node.querySelectorAll(`${MESSAGE_SELECTOR}, ${COMPOSER_SELECTOR}, table`).length > 4
         ));
         if (addedElementCount > 8 || addedLargeSubtree) {
           applyInteractiveDirections(document);
@@ -2082,6 +2626,13 @@
           target.closest(COMPOSER_SELECTOR) ||
           target.closest(RESPONSE_CHANGE_MENU_SELECTOR) ||
           target;
+        if (scopedRoot && (isCanvasDocumentBlock(scopedRoot) || isInsideCanvasDocumentBlock(scopedRoot))) {
+          continue;
+        }
+        const scopedMessage = scopedRoot && scopedRoot.closest ? scopedRoot.closest(MESSAGE_SELECTOR) : null;
+        if (scopedMessage && shouldSkipAutoMessageBecauseItContainsCanvas(scopedMessage)) {
+          continue;
+        }
         scheduleApply(scopedRoot);
       }
     });
@@ -2091,6 +2642,7 @@
 
   function handleRouteChange() {
     messageDirectionQueue.clear();
+    cleanupCanvasDirectionAncestors(document);
     applyInteractiveDirections(document);
     refreshObservedMessages(document);
     applyDirectionToVisibleMessages(document);
@@ -2127,13 +2679,17 @@
       isMessageNearViewport,
       enqueueMessageForDirection,
       processDirectionQueue,
-      detectDirectionFromText
+      detectDirectionFromText,
+      messageContainsCanvasDocument,
+      canvasDocumentContainerFor,
+      isCanvasDocumentBlock
     });
     return;
   }
 
   installDebugInspector();
   setupMessageIntersectionObserver();
+  cleanupCanvasDirectionAncestors(document);
   applyInteractiveDirections(document);
   refreshObservedMessages(document);
   applyDirectionToVisibleMessages(document);
