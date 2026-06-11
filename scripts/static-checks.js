@@ -30,6 +30,8 @@ for (const helper of [
   "containsCanvasDocumentBlock",
   "isCanvasDirectionBoundary",
   "shouldSkipDirectionTargetBecauseItAffectsCanvas",
+  "messageContainsCanvasDocument",
+  "shouldSkipAutoMessageBecauseItContainsCanvas",
   "cleanupCanvasDirectionAncestors",
   "collectElementsOutsideCanvas",
   "elementsMatchingOutsideCanvas",
@@ -90,22 +92,34 @@ for (const helper of [
 
 assert(contentJs.includes("CANVAS_DOCUMENT_SIGNAL_SELECTOR"), "Canvas detection selector must exist");
 assert(/function containsCanvasDocumentBlock\(element\) \{[\s\S]*?querySelectorAll\(CANVAS_DOCUMENT_SIGNAL_SELECTOR\)[\s\S]*?isCanvasDocumentBlock\(candidate\)/.test(contentJs), "Canvas-containing ancestors must be detectable without classifying unrelated UI");
+assert(/function messageContainsCanvasDocument\(messageElement\) \{[\s\S]*?containsCanvasDocumentBlock\(messageElement\)/.test(contentJs), "message-level Canvas helper must exist");
+assert(/function shouldSkipAutoMessageBecauseItContainsCanvas\(messageElement\) \{\s*return selectedMode === "auto" && messageContainsCanvasDocument\(messageElement\);\s*\}/.test(contentJs), "Auto mode must skip entire messages/articles that contain Canvas");
+assert(/function getMessageTextTargets\(messageElement\) \{[\s\S]*?shouldSkipAutoMessageBecauseItContainsCanvas\(messageElement\)[\s\S]*?return \[\];/.test(contentJs), "getMessageTextTargets must return no targets for Canvas-containing messages in Auto");
+assert(/function getTableDirectionTargets\(messageElement\) \{[\s\S]*?shouldSkipAutoMessageBecauseItContainsCanvas\(messageElement\)[\s\S]*?return \[\];/.test(contentJs), "getTableDirectionTargets must return no targets for Canvas-containing messages in Auto");
+assert(/function applyDirectionToMessages\(root = document\) \{[\s\S]*?shouldSkipAutoMessageBecauseItContainsCanvas\(messageElement\)[\s\S]*?continue;/.test(contentJs), "Auto message processing must skip Canvas-containing messages entirely");
+assert(/function observeMessageForLazyDirection\(messageElement\) \{[\s\S]*?shouldSkipAutoMessageBecauseItContainsCanvas\(messageElement\)[\s\S]*?return;/.test(contentJs), "lazy observation must skip Canvas-containing messages in Auto");
+assert(/function enqueueMessageForDirection\(messageElement\) \{[\s\S]*?shouldSkipAutoMessageBecauseItContainsCanvas\(messageElement\)[\s\S]*?return;/.test(contentJs), "message queueing must skip Canvas-containing messages in Auto");
+assert(/function processDirectionQueue\(\) \{[\s\S]*?shouldSkipAutoMessageBecauseItContainsCanvas\(messageElement\)[\s\S]*?continue;/.test(contentJs), "queued message processing must skip Canvas-containing messages in Auto");
+assert(/new MutationObserver\(\(mutations\) => \{[\s\S]*?const messageContainer = target.closest\(MESSAGE_SELECTOR\);[\s\S]*?shouldSkipAutoMessageBecauseItContainsCanvas\(messageContainer\)[\s\S]*?continue;/.test(contentJs), "MutationObserver must ignore mutations inside Canvas-containing messages in Auto");
+assert(/const addedElementsOutsideCanvas = \[\.\.\.mutation\.addedNodes\]\.filter\(\(node\) => \{[\s\S]*?shouldSkipAutoMessageBecauseItContainsCanvas\(addedMessage\)/.test(contentJs), "MutationObserver must not schedule visible refreshes for added Canvas-containing messages in Auto");
+assert(/function collectElementsOutsideCanvas\(root, selector\) \{[\s\S]*?querySelectorAll\(selector\)[\s\S]*?return matches;\s*\}/.test(contentJs), "collectElementsOutsideCanvas must use selector-only querySelectorAll filtering");
+assert(!/TreeWalker|createTreeWalker/.test(contentJs), "collectElementsOutsideCanvas must not use TreeWalker or deep all-node scans");
 assert(/function isCanvasDirectionBoundary\(element\) \{[\s\S]*?containsCanvasDocumentBlock\(element\)/.test(contentJs), "Canvas direction boundary helper must include ancestors containing Canvas");
 assert(/function shouldSkipDirectionTargetBecauseItAffectsCanvas\(element\) \{\s*return isCanvasDirectionBoundary\(element\);\s*\}/.test(contentJs), "direction targets that could inherit into Canvas must be skipped");
-assert(/function getMessageTextTargets\(messageElement\) \{[\s\S]*?isCanvasDocumentBlock\(messageElement\)[\s\S]*?collectElementsOutsideCanvas\(messageElement, MESSAGE_PROSE_SELECTOR\)[\s\S]*?shouldSkipDirectionTargetBecauseItAffectsCanvas\(element\)/.test(contentJs), "message/prose containers that contain Canvas must not be returned as direction targets");
-assert(/const messageIdTargets = collectElementsOutsideCanvas\(messageElement, "\[data-message-id\]"\)[\s\S]*?!shouldSkipDirectionTargetBecauseItAffectsCanvas\(element\)/.test(contentJs), "data-message-id containers that contain Canvas must not be returned as direction targets");
 assert(/const fallbackTarget = authorRoleTarget \|\| messageElement;[\s\S]*?!shouldSkipDirectionTargetBecauseItAffectsCanvas\(fallbackTarget\)/.test(contentJs), "fallback message targets that contain Canvas must be rejected");
 assert(/function applyDirection\(element, kind, forcedDirection = null\) \{[\s\S]*?shouldSkipDirectionTargetBecauseItAffectsCanvas\(element\)[\s\S]*?return forcedDirection \|\| selectedMode;/.test(contentJs), "ancestor containers containing Canvas must not be direction-managed");
 assert(/function applyInlineDirectionStyle\(element, direction\) \{[\s\S]*?shouldSkipDirectionTargetBecauseItAffectsCanvas\(element\)[\s\S]*?return;/.test(contentJs), "inline direction styles must not be applied to Canvas or Canvas-containing ancestors");
 assert(/function cleanupCanvasDirectionAncestors\(root = document\) \{[\s\S]*?containsCanvasDocumentBlock\(element\)[\s\S]*?removeDirection\(element\)/.test(contentJs), "stale extension-applied direction must be removable from Canvas-containing ancestors");
+assert(!/function scheduleCleanup\(\) \{[\s\S]*?cleanupCanvasDirectionAncestors\(document\)[\s\S]*?\}, 3000\);/.test(contentJs), "Canvas ancestor cleanup must not run during normal debounced mutation cleanup");
+assert(/function setMode\(mode, persist = true\) \{[\s\S]*?cleanupCanvasDirectionAncestors\(document\)/.test(contentJs), "Canvas ancestor cleanup should run on targeted mode switches");
+assert(/function handleRouteChange\(\) \{[\s\S]*?cleanupCanvasDirectionAncestors\(document\)/.test(contentJs), "Canvas ancestor cleanup should run on route changes");
 assert(/function removeDirection\(element\) \{[\s\S]*?isCanvasDocumentBlock\(element\) \|\| isInsideCanvasDocumentBlock\(element\)[\s\S]*?return;/.test(contentJs), "Canvas itself and Canvas children must remain untouched during cleanup");
-assert(/function clearExtensionInlineDirectionStyle\(element\) \{[\s\S]*?element\.style\.direction = ""[\s\S]*?element\.style\.textAlign = ""[\s\S]*?element\.style\.unicodeBidi = ""/.test(contentJs), "stale extension-owned inline direction styles must be clearable from Canvas-containing ancestors");
-assert(/function getTableDirectionTargets\(messageElement\) \{[\s\S]*?isCanvasDocumentBlock\(messageElement\)[\s\S]*?collectElementsOutsideCanvas\(messageElement, "table"\)/.test(contentJs), "table targets inside Canvas must be skipped");
+assert(/function getTableDirectionTargets\(messageElement\) \{[\s\S]*?collectElementsOutsideCanvas\(messageElement, "table"\)/.test(contentJs), "table targets outside Canvas must still be collected with cheap filtering");
 assert(/function shouldDirectionManageTable\(tableElement\) \{[\s\S]*?isInsideCanvasDocumentBlock\(tableElement\)[\s\S]*?return false/.test(contentJs), "table management must reject Canvas tables");
 assert(/function applyDirectionToTableCells\(tableElement\) \{[\s\S]*?collectElementsOutsideCanvas\(tableElement, "th, td"\)[\s\S]*?isInsideCanvasDocumentBlock\(cellElement\)/.test(contentJs), "table cell processing must skip Canvas cells");
-assert(/new MutationObserver\(\(mutations\) => \{[\s\S]*?isCanvasDocumentBlock\(target\) \|\| isInsideCanvasDocumentBlock\(target\)[\s\S]*?continue;/.test(contentJs), "MutationObserver must skip Canvas");
 assert(/function scheduleApply\(root = document, options = \{\}\) \{[\s\S]*?isCanvasDocumentBlock\(root\) \|\| isInsideCanvasDocumentBlock\(root\)[\s\S]*?return;/.test(contentJs), "scheduled direction passes must not run on Canvas roots");
-assert(!/selectionchange|selectstart|mouseup|mousedown/.test(contentJs), "Canvas-specific selection guards must not be installed");
+assert(!/selectionchange|selectstart|addEventListener\(["']copy["']|mouseup|mousedown/.test(contentJs), "Canvas selection/copy guards must not be installed");
+assert(!contentJs.includes('document.addEventListener("selectionchange"'), "selectionchange handler must not be added");
 
 assert(contentJs.includes("chrome.storage.local"), "mode storage must continue using chrome.storage.local");
 assert(contentJs.includes("createDirectionControl"), "direction control must still exist");
